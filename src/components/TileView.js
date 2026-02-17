@@ -1,39 +1,19 @@
 import React from 'react';
 import { Animated, Image, StyleSheet } from 'react-native';
-import { DEFAULT_TILE_SIZE } from '../constants/tile';
 
-/**
- * Компонент плитки с поддержкой анимации
- * @param {Object} textureSource - источник изображения
- * @param {Animated.ValueXY} position - анимированная позиция
- * @param {Object} panHandlers - обработчики жестов
- */
-const TileView = ({ 
-  textureSource, 
-  position,
-  panHandlers,
-}) => {
+const TileView = ({ textureSource, position, width, height, panHandlers }) => {
+  const animatedStyle = {
+    transform: [
+      { translateX: position.x },
+      { translateY: position.y }
+    ],
+    width: width,
+    height: height,
+  };
+
   return (
-    <Animated.View 
-      style={[
-        styles.container,
-        {
-          // Используем Animated стиль для позиции
-          transform: [
-            { translateX: position.x },
-            { translateY: position.y }
-          ],
-          width: DEFAULT_TILE_SIZE.width,
-          height: DEFAULT_TILE_SIZE.height,
-        }
-      ]} 
-      {...panHandlers}
-    >
-      <Image 
-        source={textureSource}
-        style={styles.tileImage}
-        resizeMode="cover"
-      />
+    <Animated.View style={[styles.container, animatedStyle]} {...panHandlers}>
+      <Image source={textureSource} style={styles.tileImage} resizeMode="cover" />
     </Animated.View>
   );
 };
@@ -50,6 +30,7 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.3,
     shadowRadius: 4,
     elevation: 5,
+    zIndex: 999,
   },
   tileImage: {
     width: '100%',
