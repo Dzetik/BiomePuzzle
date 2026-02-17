@@ -5,24 +5,37 @@ import GridView from './src/components/GridView';
 import SpawnerCellView, { resetSpawnerCache } from './src/components/SpawnerCellView';
 import useDraggable from './src/hooks/useDraggable';
 import { getSnapToSpawnerPosition } from './src/utils/gridUtils';
-import { TILE_SIZES } from './src/constants/tile';
+import { getSpawnerSize } from './src/constants/spawner'; // Импортируем getSpawnerSize
 
+// Текстура для тестовой плитки
 const testTexture = require('./assets/images/textures/test1.png');
 
 const App = () => {
+  // Сбрасываем кэш позиции спавнера при изменении размеров экрана
   useEffect(() => {
     const subscription = Dimensions.addEventListener('change', resetSpawnerCache);
     return () => subscription?.remove();
   }, []);
 
-  const initialPosition = getSnapToSpawnerPosition(TILE_SIZES.medium);
-  const { position, width, height, panHandlers } = useDraggable(initialPosition);
+  // Получаем размер спавнера для начального размера плитки
+  const spawnerSize = getSpawnerSize();
+  const initialTileSize = { width: spawnerSize, height: spawnerSize };
+  
+  // Начальная позиция плитки - центрированная относительно спавнера
+  // Используем размер спавнера для правильного центрирования
+  const initialPosition = getSnapToSpawnerPosition(initialTileSize);
+  
+  // Получаем все необходимое от хука перетаскивания
+  const { position, width, height, panHandlers } = useDraggable(initialPosition, initialTileSize);
 
   return (
     <View style={styles.container}>
       <StatusBar hidden={true} />
+      {/* Сетка (фон) */}
       <GridView />
+      {/* Визуальный спавнер */}
       <SpawnerCellView />
+      {/* Перетаскиваемая плитка */}
       <TileView 
         textureSource={testTexture}
         position={position}
@@ -37,7 +50,7 @@ const App = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#1a1a1a',
+    backgroundColor: '#1a1a1a', // Темный фон для контраста
   },
 });
 

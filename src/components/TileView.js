@@ -1,7 +1,18 @@
 import React from 'react';
 import { Animated, Image, StyleSheet } from 'react-native';
 
-const TileView = ({ textureSource, position, width, height, panHandlers }) => {
+// ========================================
+// Компонент для отображения перетаскиваемой плитки
+// ========================================
+
+const TileView = ({ 
+  textureSource,  // Изображение текстуры плитки
+  position,       // Animated.ValueXY для позиции
+  width,          // Animated.Value для ширины
+  height,         // Animated.Value для высоты
+  panHandlers     // Обработчики жестов от PanResponder
+}) => {
+  // Анимированные стили - позиция и размер
   const animatedStyle = {
     transform: [
       { translateX: position.x },
@@ -12,8 +23,15 @@ const TileView = ({ textureSource, position, width, height, panHandlers }) => {
   };
 
   return (
-    <Animated.View style={[styles.container, animatedStyle]} {...panHandlers}>
-      <Image source={textureSource} style={styles.tileImage} resizeMode="cover" />
+    <Animated.View 
+      style={[styles.container, animatedStyle]} 
+      {...panHandlers} // Привязываем обработчики перетаскивания
+    >
+      <Image 
+        source={textureSource} 
+        style={styles.tileImage} 
+        resizeMode="cover" // Изображение заполняет всю плитку
+      />
     </Animated.View>
   );
 };
@@ -30,7 +48,7 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.3,
     shadowRadius: 4,
     elevation: 5,
-    zIndex: 999,
+    zIndex: 999, // Плитка всегда поверх остальных элементов
   },
   tileImage: {
     width: '100%',
