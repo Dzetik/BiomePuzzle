@@ -2,18 +2,21 @@ import React, { useEffect } from 'react';
 import { View, StyleSheet, StatusBar, Dimensions } from 'react-native';
 import TileView from './src/components/TileView';
 import GridView from './src/components/GridView';
-import SpawnerCellView, { resetSpawnerCache } from './src/components/SpawnerCellView';
+import SpawnerCellView from './src/components/SpawnerCellView';
 import useDraggable from './src/hooks/useDraggable';
-import { getSnapToSpawnerPosition } from './src/utils/gridUtils';
-import { getSpawnerSize } from './src/constants/spawner'; // Импортируем getSpawnerSize
+import { getSnapToSpawnerPosition } from './src/utils/spawnerUtils'; 
+import { getSpawnerSize } from './src/constants/spawner';
 
 // Текстура для тестовой плитки
 const testTexture = require('./assets/images/textures/test1.png');
 
 const App = () => {
-  // Сбрасываем кэш позиции спавнера при изменении размеров экрана
+  // Сбрасываем кэши при изменении размеров экрана
   useEffect(() => {
-    const subscription = Dimensions.addEventListener('change', resetSpawnerCache);
+    const subscription = Dimensions.addEventListener('change', () => {
+      resetSpawnerCache();
+      resetSnapPointsCache(); // Сбрасываем точки притяжения
+    });
     return () => subscription?.remove();
   }, []);
 
@@ -22,7 +25,6 @@ const App = () => {
   const initialTileSize = { width: spawnerSize, height: spawnerSize };
   
   // Начальная позиция плитки - центрированная относительно спавнера
-  // Используем размер спавнера для правильного центрирования
   const initialPosition = getSnapToSpawnerPosition(initialTileSize);
   
   // Получаем все необходимое от хука перетаскивания
@@ -31,11 +33,8 @@ const App = () => {
   return (
     <View style={styles.container}>
       <StatusBar hidden={true} />
-      {/* Сетка (фон) */}
       <GridView />
-      {/* Визуальный спавнер */}
       <SpawnerCellView />
-      {/* Перетаскиваемая плитка */}
       <TileView 
         textureSource={testTexture}
         position={position}
@@ -50,7 +49,7 @@ const App = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#1a1a1a', // Темный фон для контраста
+    backgroundColor: '#1a1a1a',
   },
 });
 

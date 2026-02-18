@@ -1,9 +1,10 @@
 import { useRef, useEffect, useState } from 'react';
 import { PanResponder, Animated } from 'react-native';
 import { getScreenBounds, clampPosition } from '../utils/constraints';
-import { snapToGrid, isCenterOverSpawner } from '../utils/gridUtils';
+import { snapToGrid } from '../utils/gridUtils';
 import { DEFAULT_TILE_SIZE, TILE_SIZES } from '../constants/tile';
 import { getSpawnerSize } from '../constants/spawner';
+import { isCenterOverSpawner } from '../utils/spawnerUtils';
 
 // ========================================
 // Хук для управления перетаскиванием плитки
@@ -21,8 +22,10 @@ const useDraggable = (initialPosition = null, initialSize = null) => {
   // Начальная позиция (если не передана - по умолчанию 0,0)
   const startPosition = initialPosition || { x: 0, y: 0 };
   
-  // Начальный размер плитки (если передан - используем его, иначе стандартный)
-  const startSize = initialSize || TILE_SIZES.medium;
+  // Начальный размер плитки:
+  // - если передан initialSize - используем его
+  // - иначе используем DEFAULT_TILE_SIZE (размер ячейки сетки)
+  const startSize = initialSize || DEFAULT_TILE_SIZE;
   
   // Анимированные значения для ширины и высоты плитки
   const widthAnim = useRef(new Animated.Value(startSize.width)).current;
@@ -59,8 +62,8 @@ const useDraggable = (initialPosition = null, initialSize = null) => {
       Animated.spring(widthAnim, { 
         toValue: targetSize.width, 
         useNativeDriver: false,
-        friction: 8,  // Меньше - больше пружинистость
-        tension: 80,  // Больше - быстрее анимация
+        friction: 8,
+        tension: 80,
       }),
       Animated.spring(heightAnim, { 
         toValue: targetSize.height, 
@@ -86,7 +89,8 @@ const useDraggable = (initialPosition = null, initialSize = null) => {
       // Если состояние изменилось - обновляем размер
       if (inSpawner !== isInSpawner) {
         setIsInSpawner(inSpawner);
-        const targetSize = inSpawner ? spawnerTileSize : TILE_SIZES.medium;
+        // При выходе из спавнера возвращаемся к РАЗМЕРУ ЯЧЕЙКИ (DEFAULT_TILE_SIZE)
+        const targetSize = inSpawner ? spawnerTileSize : DEFAULT_TILE_SIZE;
         animateSize(targetSize);
       }
     });
@@ -110,19 +114,13 @@ const useDraggable = (initialPosition = null, initialSize = null) => {
   
   /**
    * PanResponder для обработки жестов перетаскивания
-   * Содержит логику начала, процесса и окончания перетаскивания
    */
   const panResponder = useRef(
     PanResponder.create({
-      // Всегда разрешаем начинать перетаскивание
       onStartShouldSetPanResponder: () => true,
       
-      /**
-       * Начало перетаскивания
-       * Запоминаем базовую позицию и смещение касания
-       */
       onPanResponderGrant: (_, gesture) => {
-        position.stopAnimation(); // Останавливаем текущую анимацию
+        position.stopAnimation();
         const currentPos = currentPositionRef.current;
         dragData.current = {
           basePosition: { ...currentPos },
@@ -133,31 +131,20 @@ const useDraggable = (initialPosition = null, initialSize = null) => {
         };
       },
       
-      /**
-       * Процесс перетаскивания
-       * Обновляем позицию в реальном времени
-       */
       onPanResponderMove: (_, gesture) => {
         const { basePosition } = dragData.current;
-        // Новая позиция = базовая + смещение жеста
         const newPosition = {
           x: basePosition.x + gesture.dx,
           y: basePosition.y + gesture.dy,
         };
-        // Ограничиваем границами экрана
         const clampedPosition = clampPosition(newPosition, boundsRef.current);
         position.setValue(clampedPosition);
       },
       
-      /**
-       * Окончание перетаскивания
-       * Примагничиваем плитку к ближайшей позиции
-       */
       onPanResponderRelease: () => {
         const currentPos = currentPositionRef.current;
         if (!currentPos) return;
         
-        // Вычисляем позицию для примагничивания
         const snappedPosition = snapToGrid(currentPos, currentTileSize.current);
         animateToPosition(snappedPosition);
         dragData.current = { basePosition: null, touchOffset: null };
@@ -165,13 +152,12 @@ const useDraggable = (initialPosition = null, initialSize = null) => {
     })
   ).current;
 
-  // Возвращаем всё необходимое для использования в компоненте
   return {
-    position,           // Animated.ValueXY для позиции
-    width: widthAnim,   // Animated.Value для ширины
-    height: heightAnim, // Animated.Value для высоты
-    panHandlers: panResponder.panHandlers, // Обработчики жестов
-    isInSpawner,        // Флаг нахождения в спавнере
+    position,
+    width: widthAnim,
+    height: heightAnim,
+    panHandlers: panResponder.panHandlers,
+    isInSpawner,
   };
 };
 
