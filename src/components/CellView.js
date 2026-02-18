@@ -1,6 +1,6 @@
 import React from 'react';
 import { View, StyleSheet } from 'react-native';
-import { getCellSize, getGridOffset } from '../constants/grid';
+import { getCellSize, getGridOffset } from '../utils/gridUtils';
 import { useZoom } from '../hooks/useZoom';
 
 // ========================================

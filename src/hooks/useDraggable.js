@@ -5,7 +5,7 @@ import { snapToGrid } from '../utils/gridUtils';
 import { getSpawnerSize } from '../constants/spawner';
 import { isCenterOverSpawner } from '../utils/spawnerUtils';
 import { useZoom } from './useZoom';
-import { getCellSize, findNearestCell, getCellCenter } from '../constants/grid';
+import { getCellSize, findNearestCell, getCellCenter } from '../utils/gridUtils';
 
 // ========================================
 // Хук для управления перетаскиваемой плиткой

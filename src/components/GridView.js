@@ -1,7 +1,7 @@
 import React from 'react';
 import { View } from 'react-native';
 import CellView from './CellView';
-import { getGridCols, getGridRows } from '../constants/grid'; 
+import { getGridCols, getGridRows } from '../utils/gridUtils';
 
 const GridView = () => {
   const cols = getGridCols();
