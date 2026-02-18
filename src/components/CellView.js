@@ -1,11 +1,22 @@
 import React from 'react';
 import { View, StyleSheet } from 'react-native';
-import { GRID, GRID_OFFSET } from '../constants/grid';
+import { getCellSize, getGridOffset } from '../constants/grid';
+import { useZoom } from '../hooks/useZoom';
+
+// ========================================
+// Компонент отдельной ячейки сетки
+// Автоматически масштабируется при изменении scale
+// ========================================
 
 const CellView = ({ col, row, children }) => {
-  // Вычисляем позицию на основе col, row и GRID_OFFSET
-  const left = GRID_OFFSET.x + col * GRID.CELL_SIZE;
-  const top = GRID_OFFSET.y + row * GRID.CELL_SIZE;
+  const { scale } = useZoom(); // Получаем текущий масштаб
+  
+  // Вычисляем позицию и размер с учетом масштаба
+  const cellSize = getCellSize(scale);
+  const offset = getGridOffset(scale);
+  
+  const left = offset.x + col * cellSize;
+  const top = offset.y + row * cellSize;
 
   return (
     <View
@@ -14,8 +25,8 @@ const CellView = ({ col, row, children }) => {
         {
           left,
           top,
-          width: GRID.CELL_SIZE,
-          height: GRID.CELL_SIZE,
+          width: cellSize,
+          height: cellSize,
         }
       ]}
     >

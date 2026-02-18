@@ -1,14 +1,17 @@
 import React from 'react';
 import { View } from 'react-native';
 import CellView from './CellView';
-import { GRID } from '../constants/grid';
+import { getGridCols, getGridRows } from '../constants/grid'; 
 
 const GridView = () => {
+  const cols = getGridCols();
+  const rows = getGridRows();
+  
   // Создаем массив ячеек
   const cells = [];
   
-  for (let row = 0; row < GRID.ROWS; row++) {
-    for (let col = 0; col < GRID.COLS; col++) {
+  for (let row = 0; row < rows; row++) {
+    for (let col = 0; col < cols; col++) {
       cells.push(
         <CellView 
           key={`${row}-${col}`} 

@@ -2,18 +2,26 @@ import { findNearestCell } from '../constants/grid';
 import { isCenterOverSpawner, getSnapToSpawnerPosition } from './spawnerUtils';
 
 // ========================================
-// УТИЛИТЫ ДЛЯ РАБОТЫ С СЕТКОЙ
+// Утилиты для притягивания плиток к сетке
 // ========================================
 
 /**
- * Примагничивает позицию к ближайшей ячейке сетки
+ * Вычисляет позицию для притягивания к конкретной ячейке
+ * @param {Object} position - текущая позиция плитки {x, y}
+ * @param {Object} tileSize - размер плитки {width, height}
+ * @param {number} scale - текущий масштаб
+ * @returns {Object} новая позиция {x, y} для притягивания
  */
-const snapToGridPosition = (position, tileSize) => {
+const snapToGridPosition = (position, tileSize, scale) => {
+  // Находим центр плитки
   const centerX = position.x + tileSize.width / 2;
   const centerY = position.y + tileSize.height / 2;
   
-  const nearestCell = findNearestCell(centerX, centerY);
+  // Ищем ближайшую ячейку по центру
+  const nearestCell = findNearestCell(centerX, centerY, scale);
   
+  // Возвращаем позицию, где верхний левый угол плитки
+  // совпадает с верхним левым углом ячейки
   return {
     x: Math.round(nearestCell.x - tileSize.width / 2),
     y: Math.round(nearestCell.y - tileSize.height / 2),
@@ -21,14 +29,20 @@ const snapToGridPosition = (position, tileSize) => {
 };
 
 /**
- * Основная функция примагничивания
+ * Основная функция притягивания - определяет, притягивать к сетке или спавнеру
+ * @param {Object} position - текущая позиция плитки
+ * @param {Object} tileSize - размер плитки
+ * @param {number} scale - текущий масштаб
+ * @returns {Object} позиция после притягивания
  */
-export const snapToGrid = (position, tileSize = null) => {
+export const snapToGrid = (position, tileSize = null, scale = 1.0) => {
   if (!position || !tileSize) return { ...position };
   
+  // Если центр плитки над спавнером - притягиваем к спавнеру
   if (isCenterOverSpawner(position, tileSize)) {
     return getSnapToSpawnerPosition(tileSize);
   }
   
-  return snapToGridPosition(position, tileSize);
+  // Иначе притягиваем к сетке
+  return snapToGridPosition(position, tileSize, scale);
 };
