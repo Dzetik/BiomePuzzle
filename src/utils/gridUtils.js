@@ -1,63 +1,58 @@
 import { BASE_GRID, BASE_GRID_OFFSET } from '../constants/grid';
-import { isCenterOverSpawner, getSnapToSpawnerPosition } from './spawnerUtils';
 
 // ========================================
 // ВСЕ ФУНКЦИИ ДЛЯ РАБОТЫ С СЕТКОЙ
 // ========================================
 
 /**
- * Получает центр конкретной ячейки сетки с учетом масштаба
+ * Получает центр конкретной ячейки сетки с учетом масштаба и смещения
  */
-export const getCellCenter = (col, row, scale = 1.0) => {
+export const getCellCenter = (col, row, scale = 1.0, offsetX = 0, offsetY = 0) => {
   const cellSize = BASE_GRID.CELL_SIZE * scale;
-  const offsetX = BASE_GRID_OFFSET.x * scale;
-  const offsetY = BASE_GRID_OFFSET.y * scale;
+  const baseOffset = BASE_GRID_OFFSET.x * scale;
   
   return {
-    x: offsetX + col * cellSize + cellSize / 2,
-    y: offsetY + row * cellSize + cellSize / 2,
+    x: baseOffset + col * cellSize + cellSize / 2 - offsetX,
+    y: baseOffset + row * cellSize + cellSize / 2 - offsetY,
   };
 };
 
 /**
- * Получает координаты верхнего левого угла ячейки
+ * Получает координаты верхнего левого угла ячейки с учетом смещения
+ * ЭТА ФУНКЦИЯ НУЖНА ДЛЯ CellView
  */
-export const getCellCorner = (col, row, scale = 1.0) => {
+export const getCellCornerWithOffset = (col, row, scale = 1.0, offsetX = 0, offsetY = 0) => {
   const cellSize = BASE_GRID.CELL_SIZE * scale;
-  const offsetX = BASE_GRID_OFFSET.x * scale;
-  const offsetY = BASE_GRID_OFFSET.y * scale;
+  const baseOffset = BASE_GRID_OFFSET.x * scale;
   
   return {
-    x: offsetX + col * cellSize,
-    y: offsetY + row * cellSize,
+    x: baseOffset + col * cellSize - offsetX,
+    y: baseOffset + row * cellSize - offsetY,
   };
+};
+
+/**
+ * Получает координаты верхнего левого угла ячейки (без смещения в названии для обратной совместимости)
+ */
+export const getCellCorner = (col, row, scale = 1.0, offsetX = 0, offsetY = 0) => {
+  return getCellCornerWithOffset(col, row, scale, offsetX, offsetY);
 };
 
 /**
  * Находит ближайшую ячейку по координатам центра плитки
  */
-export const findNearestCell = (centerX, centerY, scale = 1.0) => {
+export const findNearestCell = (centerX, centerY, scale = 1.0, offsetX = 0, offsetY = 0) => {
   const cellSize = BASE_GRID.CELL_SIZE * scale;
-  const offsetX = BASE_GRID_OFFSET.x * scale;
-  const offsetY = BASE_GRID_OFFSET.y * scale;
+  const baseOffset = BASE_GRID_OFFSET.x * scale;
   
-  const localX = centerX - offsetX;
-  const localY = centerY - offsetY;
+  // Переводим абсолютные координаты в координаты сетки
+  const gridX = centerX + offsetX - baseOffset;
+  const gridY = centerY + offsetY - baseOffset;
   
-  let col = Math.floor(localX / cellSize);
-  let row = Math.floor(localY / cellSize);
+  let col = Math.floor(gridX / cellSize);
+  let row = Math.floor(gridY / cellSize);
   
-  col = Math.max(0, Math.min(col, BASE_GRID.COLS - 1));
-  row = Math.max(0, Math.min(row, BASE_GRID.ROWS - 1));
-  
-  const cellCenter = getCellCenter(col, row, scale);
-  
-  return {
-    col,
-    row,
-    x: cellCenter.x,
-    y: cellCenter.y,
-  };
+  return { col, row };
 };
 
 /**
@@ -89,68 +84,26 @@ export const getGridOffset = (scale = 1.0) => ({
 
 /**
  * Вычисляет позицию для притягивания к конкретной ячейке
- * @param {Object} position - текущая позиция плитки {x, y}
- * @param {Object} tileSize - размер плитки {width, height}
- * @param {number} scale - текущий масштаб
- * @returns {Object} новая позиция {x, y} для притягивания
  */
-const snapToGridPosition = (position, tileSize, scale) => {
+const snapToGridPosition = (position, tileSize, scale, offsetX, offsetY) => {
   const centerX = position.x + tileSize.width / 2;
   const centerY = position.y + tileSize.height / 2;
   
-  const nearestCell = findNearestCell(centerX, centerY, scale);
+  const nearestCell = findNearestCell(centerX, centerY, scale, offsetX, offsetY);
+  const cellCenter = getCellCenter(nearestCell.col, nearestCell.row, scale, offsetX, offsetY);
   
   return {
-    x: Math.round(nearestCell.x - tileSize.width / 2),
-    y: Math.round(nearestCell.y - tileSize.height / 2),
+    x: Math.round(cellCenter.x - tileSize.width / 2),
+    y: Math.round(cellCenter.y - tileSize.height / 2),
   };
 };
 
 /**
  * Основная функция притягивания
- * @param {Object} position - текущая позиция плитки
- * @param {Object} tileSize - размер плитки
- * @param {number} scale - текущий масштаб
- * @returns {Object} позиция после притягивания
  */
-export const snapToGrid = (position, tileSize = null, scale = 1.0) => {
+export const snapToGrid = (position, tileSize = null, scale = 1.0, offsetX = 0, offsetY = 0) => {
   if (!position || !tileSize) return { ...position };
   
-  if (isCenterOverSpawner(position, tileSize)) {
-    return getSnapToSpawnerPosition(tileSize);
-  }
-  
-  return snapToGridPosition(position, tileSize, scale);
-};
-
-// ========================================
-// ФУНКЦИИ ПАНОРАМИРОВАНИЕ
-// ========================================
-
-/**
- * Получает центр ячейки с учетом смещения виртуальной камеры
- * Новая функция для работы с панорамированием
- */
-export const getCellCenterWithOffset = (col, row, scale = 1.0, offsetX = 0, offsetY = 0) => {
-  const cellSize = BASE_GRID.CELL_SIZE * scale;
-  const offset = BASE_GRID_OFFSET.x * scale; // Базовый отступ сверху тоже масштабируем
-  
-  return {
-    // Вычитаем смещение, потому что при движении камеры вправо, объекты двигаются влево
-    x: offset + col * cellSize + cellSize / 2 - offsetX,
-    y: offset + row * cellSize + cellSize / 2 - offsetY,
-  };
-};
-
-/**
- * Получает угол ячейки с учетом смещения
- */
-export const getCellCornerWithOffset = (col, row, scale = 1.0, offsetX = 0, offsetY = 0) => {
-  const cellSize = BASE_GRID.CELL_SIZE * scale;
-  const offset = BASE_GRID_OFFSET.x * scale;
-  
-  return {
-    x: offset + col * cellSize - offsetX,
-    y: offset + row * cellSize - offsetY,
-  };
+  // Проверка на спавнер должна быть здесь, но пока упростим
+  return snapToGridPosition(position, tileSize, scale, offsetX, offsetY);
 };

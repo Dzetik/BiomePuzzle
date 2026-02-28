@@ -7,15 +7,16 @@ import SpawnerCellView from './src/components/SpawnerCellView';
 import useDraggable from './src/hooks/useDraggable';
 import { useZoom, ZoomProvider } from './src/hooks/useZoom';
 import { GridProvider } from './src/context/GridContext';
+import { TilesProvider } from './src/context/TilesContext';
 import { getSnapToSpawnerPosition } from './src/utils/spawnerUtils'; 
 import { getSpawnerSize } from './src/constants/spawner';
 
 const testTexture = require('./assets/images/textures/test1.png');
 
-const GameContent = () => {
+// Компонент с жестом зума
+const ZoomHandler = ({ children }) => {
   const { scale, setScale, MIN_SCALE, MAX_SCALE } = useZoom();
   
-  // Создаём пинч-жест здесь
   const pinchGesture = Gesture.Pinch()
     .onStart(() => {
       console.log('[Pinch] Начало');
@@ -23,31 +24,42 @@ const GameContent = () => {
     .onUpdate((event) => {
       const newScale = scale * event.scale;
       const clampedScale = Math.min(MAX_SCALE, Math.max(MIN_SCALE, newScale));
+      console.log('[Pinch] Новый масштаб:', clampedScale);
       setScale(clampedScale);
     })
     .onEnd(() => {
       console.log('[Pinch] Конец');
     });
 
+  return (
+    <GestureDetector gesture={pinchGesture}>
+      <View style={{ flex: 1 }}>
+        {children}
+      </View>
+    </GestureDetector>
+  );
+};
+
+const GameContent = () => {
   const spawnerSize = getSpawnerSize();
   const initialTileSize = { width: spawnerSize, height: spawnerSize };
   const initialPosition = getSnapToSpawnerPosition(initialTileSize);
-  const { position, width, height, panHandlers: tilePanHandlers } = useDraggable(initialPosition);
+  
+  // Исправлено: получаем panHandlers из хука
+  const { position, width, height, panHandlers } = useDraggable(initialPosition, 'tile-1');
 
   return (
-    <GestureDetector gesture={pinchGesture}>
-      <View style={styles.gameContainer}>
-        <GridView />
-        <SpawnerCellView />
-        <TileView 
-          textureSource={testTexture}
-          position={position}
-          width={width}
-          height={height}
-          panHandlers={tilePanHandlers}
-        />
-      </View>
-    </GestureDetector>
+    <View style={styles.gameContainer}>
+      <GridView />
+      <SpawnerCellView />
+      <TileView 
+        textureSource={testTexture}
+        position={position}
+        width={width}
+        height={height}
+        panHandlers={panHandlers} // Исправлено: panHandlers вместо tilePanHandlers
+      />
+    </View>
   );
 };
 
@@ -56,8 +68,12 @@ const App = () => {
     <GestureHandlerRootView style={styles.container}>
       <ZoomProvider>
         <GridProvider>
-          <StatusBar hidden={true} />
-          <GameContent />
+          <TilesProvider>
+            <StatusBar hidden={true} />
+            <ZoomHandler>
+              <GameContent />
+            </ZoomHandler>
+          </TilesProvider>
         </GridProvider>
       </ZoomProvider>
     </GestureHandlerRootView>
