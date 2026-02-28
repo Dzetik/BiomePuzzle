@@ -1,5 +1,3 @@
-import { getCachedSpawnerPosition } from '../hooks/useSpawnerPosition';
-
 // ========================================
 // УТИЛИТЫ ДЛЯ РАБОТЫ СО СПАВНЕРОМ
 // ========================================
@@ -8,10 +6,10 @@ import { getCachedSpawnerPosition } from '../hooks/useSpawnerPosition';
  * Проверяет, находится ли центр плитки над спавнером
  * @param {Object} position - позиция плитки {x, y}
  * @param {Object} tileSize - размер плитки {width, height}
+ * @param {Object} spawnerPos - позиция спавнера {x, y, size}
  * @returns {boolean}
  */
-export const isCenterOverSpawner = (position, tileSize) => {
-  const spawnerPos = getCachedSpawnerPosition();
+export const isCenterOverSpawner = (position, tileSize, spawnerPos) => {
   if (!spawnerPos || !tileSize || !position) return false;
   
   const centerX = position.x + tileSize.width / 2;
@@ -28,10 +26,10 @@ export const isCenterOverSpawner = (position, tileSize) => {
 /**
  * Вычисляет позицию для центрирования плитки относительно спавнера
  * @param {Object} tileSize - размер плитки
+ * @param {Object} spawnerPos - позиция спавнера {x, y, size}
  * @returns {Object} позиция {x, y}
  */
-export const getSnapToSpawnerPosition = (tileSize) => {
-  const spawnerPos = getCachedSpawnerPosition();
+export const getSnapToSpawnerPosition = (tileSize, spawnerPos) => {
   if (!spawnerPos || !tileSize) return { x: 0, y: 0 };
   
   const spawnerCenterX = spawnerPos.x + spawnerPos.size / 2;
