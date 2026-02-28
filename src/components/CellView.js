@@ -1,47 +1,51 @@
-import React from 'react';
+import React, { memo, useEffect } from 'react';
 import { View, StyleSheet } from 'react-native';
-import { getCellSize, getGridOffset } from '../utils/gridUtils';
 import { useZoom } from '../hooks/useZoom';
+import { useGrid } from '../context/GridContext';
+import { getCellCornerWithOffset } from '../utils/gridUtils';
 
-// ========================================
-// Компонент отдельной ячейки сетки
-// Автоматически масштабируется при изменении scale
-// ========================================
+const CellView = memo(({ col, row }) => {
+  const { scale } = useZoom();
+  const { offset } = useGrid();
+  
+  // Логируем только для угловых ячеек, чтобы не спамить
+  useEffect(() => {
+    if ((col === 0 && row === 0) || (col === 7 && row === 11)) {
+      console.log(`[CellView ${col},${row}] Получила offset:`, offset);
+    }
+  }, [offset, col, row]);
+  
+  const position = getCellCornerWithOffset(col, row, scale, offset.x, offset.y);
+  const cellSize = 90 * scale;
 
-const CellView = ({ col, row, children }) => {
-  const { scale } = useZoom(); // Получаем текущий масштаб
-  
-  // Вычисляем позицию и размер с учетом масштаба
-  const cellSize = getCellSize(scale);
-  const offset = getGridOffset(scale);
-  
-  const left = offset.x + col * cellSize;
-  const top = offset.y + row * cellSize;
+  // Логируем позицию для угловых ячеек
+  useEffect(() => {
+    if ((col === 0 && row === 0) || (col === 7 && row === 11)) {
+      console.log(`[CellView ${col},${row}] Новая позиция:`, position);
+    }
+  }, [position.x, position.y, col, row]);
 
   return (
     <View
       style={[
         styles.cell,
         {
-          left,
-          top,
           width: cellSize,
           height: cellSize,
+          left: position.x,
+          top: position.y,
+          borderWidth: 1 * scale,
         }
       ]}
-    >
-      {children}
-    </View>
+    />
   );
-};
+});
 
 const styles = StyleSheet.create({
   cell: {
     position: 'absolute',
-    borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.2)',
-    justifyContent: 'center',
-    alignItems: 'center',
+    backgroundColor: 'transparent',
   },
 });
 

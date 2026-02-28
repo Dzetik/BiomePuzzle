@@ -122,3 +122,35 @@ export const snapToGrid = (position, tileSize = null, scale = 1.0) => {
   
   return snapToGridPosition(position, tileSize, scale);
 };
+
+// ========================================
+// ФУНКЦИИ ПАНОРАМИРОВАНИЕ
+// ========================================
+
+/**
+ * Получает центр ячейки с учетом смещения виртуальной камеры
+ * Новая функция для работы с панорамированием
+ */
+export const getCellCenterWithOffset = (col, row, scale = 1.0, offsetX = 0, offsetY = 0) => {
+  const cellSize = BASE_GRID.CELL_SIZE * scale;
+  const offset = BASE_GRID_OFFSET.x * scale; // Базовый отступ сверху тоже масштабируем
+  
+  return {
+    // Вычитаем смещение, потому что при движении камеры вправо, объекты двигаются влево
+    x: offset + col * cellSize + cellSize / 2 - offsetX,
+    y: offset + row * cellSize + cellSize / 2 - offsetY,
+  };
+};
+
+/**
+ * Получает угол ячейки с учетом смещения
+ */
+export const getCellCornerWithOffset = (col, row, scale = 1.0, offsetX = 0, offsetY = 0) => {
+  const cellSize = BASE_GRID.CELL_SIZE * scale;
+  const offset = BASE_GRID_OFFSET.x * scale;
+  
+  return {
+    x: offset + col * cellSize - offsetX,
+    y: offset + row * cellSize - offsetY,
+  };
+};

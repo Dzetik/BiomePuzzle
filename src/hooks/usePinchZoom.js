@@ -5,7 +5,36 @@ import { Gesture } from 'react-native-gesture-handler';
 // Хук для обработки жеста щипка (pinch-to-zoom)
 // ========================================
 
-const usePinchZoom = (scale, setScale, minScale, maxScale) => {
+export const usePinchZoom = (scale, setScale, MIN_SCALE, MAX_SCALE) => {
+  const baseScaleRef = useRef(1);
+
+  const pinchGesture = Gesture.Pinch()
+    .onStart(() => {
+      console.log('[Pinch] Начало');
+      baseScaleRef.current = scale;
+    })
+    .onUpdate((event) => {
+      // Игнорируем очень маленькие изменения
+      if (Math.abs(event.scale - 1) < 0.01) return;
+      
+      const newScale = baseScaleRef.current * event.scale;
+      const clampedScale = Math.min(MAX_SCALE, Math.max(MIN_SCALE, newScale));
+      console.log('[Pinch] Масштаб:', clampedScale.toFixed(2), 'scale factor:', event.scale.toFixed(2));
+      setScale(clampedScale);
+    })
+    .onEnd(() => {
+      console.log('[Pinch] Конец');
+    })
+    // Указываем, что этот жест не должен конфликтовать с панорамированием
+    .simultaneousWithExternalGesture([]);
+
+  return pinchGesture;
+};
+
+export default usePinchZoom;
+
+
+/*const usePinchZoom = (scale, setScale, minScale, maxScale) => {
   // Масштаб на момент начала жеста
   const baseScaleRef = useRef(scale);
 
@@ -31,4 +60,4 @@ const usePinchZoom = (scale, setScale, minScale, maxScale) => {
   return pinchGesture;
 };
 
-export default usePinchZoom;
+export default usePinchZoom;*/
