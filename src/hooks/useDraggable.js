@@ -45,14 +45,9 @@ const useDraggable = (initialPosition = null, tileId = null) => {
   
   /**
    * isSpawnerReady - флаг, что спавнер уже имеет корректные координаты
-   * (используется, чтобы не рассчитывать позицию до получения данных)
+   * isInSpawner - флаг нахождения плитки в спавнере
    */
   const [isSpawnerReady, setIsSpawnerReady] = useState(false);
-  
-  /**
-   * isInSpawner - флаг нахождения плитки в спавнере
-   * Поднимаем на этот уровень, чтобы передавать во все дочерние хуки
-   */
   const [isInSpawner, setIsInSpawner] = useState(true);
   
   // ========================================
@@ -60,11 +55,8 @@ const useDraggable = (initialPosition = null, tileId = null) => {
   // ========================================
   
   /**
-   * targetCellRef - ссылка на объект с координатами целевой ячейки {col, row}
-   * или null, если плитка в спавнере
-   * 
-   * ВАЖНО: Создаётся здесь и передаётся во все дочерние хуки,
-   * чтобы все работали с одним и тем же ref
+   * targetCellRef - единый ref для всех под-хуков
+   * Содержит {col, row} или null (если плитка в спавнере)
    */
   const targetCellRef = useRef(null);
 
@@ -72,10 +64,6 @@ const useDraggable = (initialPosition = null, tileId = null) => {
   // 4. ОТСЛЕЖИВАНИЕ ГОТОВНОСТИ СПАВНЕРА
   // ========================================
   
-  /**
-   * Эффект срабатывает, когда spawnerPos получает корректные координаты
-   * (spawnerPos.size > 0 означает, что спавнер отрисован и известны его размеры)
-   */
   useEffect(() => {
     if (spawnerPos.size > 0) {
       console.log(`[Tile ${tileId}] Спавнер готов:`, spawnerPos);
@@ -87,18 +75,12 @@ const useDraggable = (initialPosition = null, tileId = null) => {
   // 5. ВЫЧИСЛЕНИЕ НАЧАЛЬНЫХ ЗНАЧЕНИЙ
   // ========================================
   
-  /**
-   * spawnerSize - размер спавнера из конфига
-   * initialTileSize - начальный размер плитки (равен размеру спавнера)
-   */
   const spawnerSize = getSpawnerSize();
   const initialTileSize = { width: spawnerSize, height: spawnerSize };
   
   /**
    * startPosition - начальная позиция плитки
-   * Если передан initialPosition - используем его
-   * Иначе центрируем в спавнере (как только он готов)
-   * Иначе временно ставим в (0,0)
+   * Центрируем в спавнере, как только он готов
    */
   const startPosition = useCallback(() => {
     if (initialPosition) return initialPosition;
@@ -114,11 +96,7 @@ const useDraggable = (initialPosition = null, tileId = null) => {
   
   /**
    * ПОРЯДОК ВАЖЕН!
-   * 1. Анимации - базовый слой, создаёт анимированные значения
-   * 2. Спавнер логика - зависит от анимаций
-   * 3. Целевая ячейка - зависит от анимаций и спавнера
-   * 4. Размещение - зависит от всего вышеперечисленного
-   * 5. Обработчик жестов - замыкает всё вместе
+   * Каждый следующий хук зависит от предыдущих
    */
   
   // --- 6.1 Анимации (самый базовый слой) ---
@@ -200,8 +178,7 @@ const useDraggable = (initialPosition = null, tileId = null) => {
     setInSpawner,
     setOutOfSpawner,
     animateToPosition,
-    scale,
-    offset,
+    // scale и offset не передаём - получаем напрямую в useTilePlacement
   });
 
   // --- 6.5 Обработчик жестов ---
@@ -222,8 +199,7 @@ const useDraggable = (initialPosition = null, tileId = null) => {
   // ========================================
   
   /**
-   * Подписываемся на изменения позиции плитки
-   * Каждое изменение передаётся в handlePositionChange,
+   * Каждое изменение позиции передаётся в handlePositionChange,
    * который проверяет вход/выход из спавнера
    */
   useEffect(() => {
@@ -239,8 +215,8 @@ const useDraggable = (initialPosition = null, tileId = null) => {
   // ========================================
   
   /**
-   * Если плитка вышла из спавнера, но у неё ещё нет целевой ячейки
-   * (например, при первом выходе), обновляем ячейку по текущей позиции
+   * При первом выходе из спавнера (нет целевой ячейки)
+   * определяем ячейку по текущей позиции
    */
   useEffect(() => {
     if (!isInSpawner && !targetCellRef.current) {
@@ -252,15 +228,12 @@ const useDraggable = (initialPosition = null, tileId = null) => {
   // 9. ВОЗВРАЩАЕМЫЙ API
   // ========================================
   
-  /**
-   * Всё, что нужно компоненту TileView для отрисовки и взаимодействия
-   */
   return {
-    position,        // Animated.ValueXY - позиция плитки
-    width,           // Animated.Value - ширина плитки
-    height,          // Animated.Value - высота плитки
+    position,        // Animated.ValueXY для позиции
+    width,           // Animated.Value для ширины
+    height,          // Animated.Value для высоты
     panHandlers,     // Обработчики жестов для Animated.View
-    isInSpawner,     // Флаг для отладки (можно показать на экране)
+    isInSpawner,     // Флаг для отладки
   };
 };
 

@@ -1,222 +1,208 @@
 // ========================================
-// Хук для логики размещения плитки при отпускании
-// Отвечает за принятие решения: спавнер или сетка
-// Вызывается из useTileDragHandler при завершении жеста
+// ХУК РАЗМЕЩЕНИЯ ПЛИТКИ
+// Отвечает за логику размещения плитки при отпускании:
+// - Проверка зоны притяжения спавнера
+// - Притягивание к спавнеру или к сетке
+// - Занятие/освобождение ячеек
+// - Возврат в предыдущее положение при неудаче
 // ========================================
 
-import { snapToGrid, findNearestCell } from '../../utils/gridUtils';
+import { useCallback, useRef } from 'react';
+import { useZoom } from '../useZoom';
+import { useGrid } from '../../context/GridContext';
+import { findNearestCell, getSnapToCellPosition } from '../../utils/gridUtils';
 import { getSnapToSpawnerPosition, isInGravityZone } from '../../utils/spawnerUtils';
 
 export const useTilePlacement = ({
-  tileId,                    // ID плитки для логирования
+  tileId,                    // ID плитки (для отладки)
   spawnerPos,                 // Позиция спавнера {x, y, size}
-  currentTileSize,            // Ref с текущим размером плитки
-  currentPositionRef,         // Ref с текущей позицией плитки
+  currentTileSize,            // Ref с актуальным размером плитки
+  currentPositionRef,         // Ref с актуальной позицией плитки
   isInSpawner,                // Флаг: сейчас в спавнере?
-  targetCellRef,              // Ref с целевой ячейкой {col, row} или null
-  isCellFree,                 // Функция проверки свободы ячейки (из useTileTargetCell)
-  tryOccupyCell,              // Функция попытки занять ячейку (из useTileTargetCell)
-  releaseCurrentCell,         // Функция освобождения текущей ячейки (из useTileTargetCell)
-  setInSpawner,               // Функция принудительного входа в спавнер
-  setOutOfSpawner,            // Функция принудительного выхода из спавнера
-  animateToPosition,          // Функция анимации перемещения (из useTileAnimations)
-  scale,                      // Текущий масштаб
-  offset,                     // Текущее смещение сетки
+  targetCellRef,              // Ref с целевой ячейкой {col, row}
+  isCellFree,                 // Функция проверки свободы ячейки
+  tryOccupyCell,              // Функция попытки занять ячейку
+  releaseCurrentCell,         // Функция освобождения ячейки
+  setInSpawner,               // Принудительный вход в спавнер
+  setOutOfSpawner,            // Принудительный выход из спавнера
+  animateToPosition,          // Функция анимации перемещения
 }) => {
   
+  // Получаем актуальные значения из контекстов
+  const { scale } = useZoom();
+  const { offset } = useGrid();
+  
+  /**
+   * Используем ref для хранения актуальных значений scale и offset.
+   * Это гарантирует, что даже при замыкании в useCallback мы получим
+   * свежие значения в момент вызова функции.
+   */
+  const scaleRef = useRef(scale);
+  const offsetRef = useRef(offset);
+  
+  // Обновляем ref при каждом рендере
+  scaleRef.current = scale;
+  offsetRef.current = offset;
+
   /**
    * Проверяет, находится ли центр плитки в зоне притяжения спавнера
-   * Использует утилиту isInGravityZone из spawnerUtils
-   * @param {Object} position - текущая позиция плитки {x, y}
+   * @param {Object} position - позиция плитки {x, y}
    * @returns {boolean} true если в зоне притяжения
    */
-  const checkGravityZone = (position) => {
+  const checkGravityZone = useCallback((position) => {
     return isInGravityZone(
       position,
       currentTileSize.current,
       spawnerPos
     );
-  };
+  }, [currentTileSize, spawnerPos]);
 
   /**
    * Притягивает плитку к спавнеру
-   * Вызывается, если плитка отпущена в зоне притяжения
    * @returns {Object} позиция для анимации {x, y}
    */
-  const snapToSpawner = () => {
+  const snapToSpawner = useCallback(() => {
     console.log(`[Tile ${tileId}] ПРИТЯГИВАЕМ К СПАВНЕРУ`);
     
-    // Если плитка была в сетке (не в спавнере) и у неё была ячейка
+    // Если плитка была в сетке - освобождаем ячейку
     if (!isInSpawner && targetCellRef.current) {
-      // Удаляем её из контекста плиток (освобождаем ячейку)
       releaseCurrentCell();
     }
     
-    // Получаем позицию для центрирования плитки в спавнере
+    // Вычисляем позицию для центрирования в спавнере
     const spawnerPosition = getSnapToSpawnerPosition(
       currentTileSize.current, 
       spawnerPos
     );
     
-    // Устанавливаем флаг "в спавнере" (через колбэк из useTileSpawnerLogic)
+    // Устанавливаем состояние "в спавнере" и сбрасываем целевую ячейку
     setInSpawner(true);
+    targetCellRef.current = null;
     
     return spawnerPosition;
-  };
+  }, [tileId, isInSpawner, targetCellRef, releaseCurrentCell, currentTileSize, spawnerPos, setInSpawner]);
 
   /**
    * Притягивает плитку к сетке и пытается занять ячейку
-   * Вызывается, если плитка отпущена вне зоны притяжения
-   * @returns {Object|null} позиция для анимации или null если нужно вернуться
+   * @returns {Object|null} позиция для анимации или null если не удалось
    */
-  const snapToGridAndPlace = () => {
+  const snapToGridAndPlace = useCallback(() => {
     console.log(`[Tile ${tileId}] Притягиваем к сетке`);
     
     const currentPos = currentPositionRef.current;
+    const tileSize = currentTileSize.current;
     
-    /**
-     * 1. Притягиваем позицию плитки к сетке
-     * snapToGrid возвращает позицию верхнего левого угла плитки,
-     * выровненную по сетке (с учётом scale и offset)
-     */
-    const snappedPosition = snapToGrid(
-      currentPos, 
-      currentTileSize.current, 
-      scale,
-      offset.x,
-      offset.y
-    );
+    // Вычисляем центр плитки для поиска ближайшей ячейки
+    const centerX = currentPos.x + tileSize.width / 2;
+    const centerY = currentPos.y + tileSize.height / 2;
     
-    /**
-     * 2. Вычисляем центр плитки после притягивания
-     * Нужно для определения, в какую именно ячейку мы попали
-     */
-    const snappedCenter = {
-      x: snappedPosition.x + currentTileSize.current.width / 2,
-      y: snappedPosition.y + currentTileSize.current.height / 2
-    };
+    // Берем актуальные значения из ref (а не из замыкания)
+    const currentScale = scaleRef.current;
+    const currentOffset = offsetRef.current;
     
-    /**
-     * 3. Находим ближайшую ячейку к центру плитки
-     */
+    // Находим ближайшую ячейку к центру плитки
     const targetCell = findNearestCell(
-      snappedCenter.x, 
-      snappedCenter.y, 
-      scale,
-      offset.x,
-      offset.y
+      centerX, 
+      centerY, 
+      currentScale,
+      currentOffset.x,
+      currentOffset.y
     );
     
     console.log(`[Tile ${tileId}] Целевая ячейка: [${targetCell.col},${targetCell.row}]`);
     
-    /**
-     * 4. Проверяем, свободна ли ячейка
-     * isCellFree учитывает, что ячейка может быть занята этой же плиткой
-     */
+    // Проверяем, свободна ли целевая ячейка
     if (isCellFree(targetCell.col, targetCell.row)) {
-      // 5. Пытаемся занять ячейку (добавить или переместить плитку в контексте)
+      // Вычисляем точную позицию для этой ячейки
+      const snappedPosition = getSnapToCellPosition(
+        tileSize,
+        targetCell.col,
+        targetCell.row,
+        currentScale,
+        currentOffset.x,
+        currentOffset.y
+      );
+      
+      // Пытаемся занять ячейку в контексте
       const success = tryOccupyCell(targetCell.col, targetCell.row);
       
       if (success) {
-        // 6. Если успешно - выходим из спавнера и возвращаем позицию для анимации
+        console.log(`[Tile ${tileId}] Позиция для ячейки [${targetCell.col},${targetCell.row}]:`, snappedPosition);
+        
+        // Выходим из спавнера (размер обновится автоматически)
         setOutOfSpawner(true);
+        
         return snappedPosition;
       }
     }
     
-    /**
-     * 7. Если ячейка занята или не удалось занять - возвращаем null
-     * Это сигнал для handlePlacement, что нужно вернуться в предыдущее положение
-     */
     console.log(`[Tile ${tileId}] Ячейка занята или ошибка, возврат`);
     return null;
-  };
+  }, [
+    tileId, currentPositionRef, currentTileSize, 
+    isCellFree, tryOccupyCell, setOutOfSpawner,
+    // scale и offset не используются напрямую, но нужны для пересоздания колбэка
+    // при их изменении (значения берутся из ref)
+  ]);
 
   /**
    * Возвращает плитку в предыдущее положение
-   * Вызывается, когда не удалось разместить плитку в сетке
-   * @returns {Object} позиция для возврата {x, y}
+   * @returns {Object} позиция для анимации {x, y}
    */
-  const revertToPrevious = () => {
+  const revertToPrevious = useCallback(() => {
     console.log(`[Tile ${tileId}] Возврат в предыдущее положение`);
     
-    /**
-     * Если плитка была в сетке и у неё есть целевая ячейка
-     * Возвращаемся в эту ячейку
-     */
+    // Если плитка была в сетке и есть целевая ячейка - возвращаемся в неё
     if (!isInSpawner && targetCellRef.current) {
-      // Динамический импорт для избежания циклических зависимостей
-      const { getCellCenter } = require('../../utils/gridUtils');
+      const tileSize = currentTileSize.current;
+      const currentScale = scaleRef.current;
+      const currentOffset = offsetRef.current;
       
-      // Получаем центр целевой ячейки с учётом текущих scale и offset
-      const cellCenter = getCellCenter(
+      return getSnapToCellPosition(
+        tileSize,
         targetCellRef.current.col,
         targetCellRef.current.row,
-        scale,
-        offset.x,
-        offset.y
+        currentScale,
+        currentOffset.x,
+        currentOffset.y
       );
-      
-      // Вычисляем позицию верхнего левого угла плитки
-      const prevPosition = {
-        x: cellCenter.x - currentTileSize.current.width / 2,
-        y: cellCenter.y - currentTileSize.current.height / 2,
-      };
-      
-      return prevPosition;
     } 
     
-    /**
-     * Иначе (плитка была в спавнере или нет целевой ячейки)
-     * Возвращаемся в спавнер
-     */
+    // Иначе возвращаемся в спавнер
     return getSnapToSpawnerPosition(currentTileSize.current, spawnerPos);
-  };
+  }, [tileId, isInSpawner, targetCellRef, currentTileSize, spawnerPos]);
 
   /**
    * Основная функция размещения при отпускании
-   * Вызывается из useTileDragHandler.handleRelease
-   * 
-   * Логика принятия решения:
-   * 1. Если плитка в зоне притяжения спавнера → притягиваем к спавнеру
-   * 2. Иначе пытаемся притянуть к сетке и занять ячейку
-   * 3. Если не получилось занять ячейку → возвращаемся в предыдущее положение
-   * 
+   * Вызывается из useTileDragHandler
    * @returns {Object} позиция для анимации {x, y}
    */
-  const handlePlacement = () => {
+  const handlePlacement = useCallback(() => {
     const currentPos = currentPositionRef.current;
     
-    // Проверяем зону притяжения
+    // Сначала проверяем зону притяжения спавнера
     const inGravityZone = checkGravityZone(currentPos);
     
     console.log(`[Tile ${tileId}] В зоне притяжения:`, inGravityZone);
     
-    // ПРИОРИТЕТ 1: Спавнер (если в зоне притяжения)
+    // ПРИОРИТЕТ 1: Спавнер
     if (inGravityZone) {
-      console.log(`[Tile ${tileId}] В зоне притяжения спавнера!`);
-      const spawnerPosition = snapToSpawner();
-      return spawnerPosition;
+      return snapToSpawner();
     }
     
-    // ПРИОРИТЕТ 2: Сетка (если вне зоны притяжения)
+    // ПРИОРИТЕТ 2: Сетка
     const gridPosition = snapToGridAndPlace();
     
     if (gridPosition) {
-      // Успешно разместили в сетке
       return gridPosition;
     } else {
-      // Не удалось разместить - возвращаемся
-      const revertPosition = revertToPrevious();
-      return revertPosition;
+      // Если не удалось разместить в сетке - возвращаемся
+      return revertToPrevious();
     }
-  };
+  }, [tileId, currentPositionRef, checkGravityZone, snapToSpawner, snapToGridAndPlace, revertToPrevious]);
 
-  /**
-   * Возвращаем API для родительского хука useDraggable
-   */
   return {
     handlePlacement,  // Основная функция размещения
-    checkGravityZone, // Функция проверки зоны притяжения (может пригодиться)
+    checkGravityZone, // Функция проверки зоны притяжения (для переиспользования)
   };
 };
