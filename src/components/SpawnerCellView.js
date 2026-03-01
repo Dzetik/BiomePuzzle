@@ -1,9 +1,21 @@
 import React from 'react';
 import { View, StyleSheet } from 'react-native';
 import { useSpawner } from '../hooks/useSpawner';
+import { 
+  getGravityZoneSize,
+  getGravityZonePadding,
+  getGravityZoneVisual,
+  isGravityZoneEnabled 
+} from '../constants/spawner';
 
 const SpawnerCellView = () => {
   const spawnerPos = useSpawner();
+  
+  // Получаем настройки из конфига
+  const zoneEnabled = isGravityZoneEnabled();
+  const zoneVisual = getGravityZoneVisual();
+  const zoneSize = getGravityZoneSize();
+  const padding = getGravityZonePadding();
 
   return (
     <View 
@@ -18,6 +30,26 @@ const SpawnerCellView = () => {
       ]}
       pointerEvents="none"
     >
+      {/* Зона притяжения (отображается только если включена в конфиге) */}
+      {zoneEnabled && zoneVisual.showZone && (
+        <View 
+          style={[
+            styles.gravityZone,
+            {
+              left: -padding,
+              top: -padding,
+              width: zoneSize,
+              height: zoneSize,
+              backgroundColor: zoneVisual.color,
+              borderColor: zoneVisual.borderColor,
+              borderWidth: zoneVisual.borderWidth,
+              borderStyle: zoneVisual.borderStyle,
+            }
+          ]} 
+        />
+      )}
+      
+      {/* Основная рамка спавнера */}
       <View style={styles.border} />
       <View style={styles.glow} />
     </View>
@@ -49,6 +81,11 @@ const styles = StyleSheet.create({
     borderRadius: 22,
     backgroundColor: 'rgba(76, 175, 80, 0.1)',
     zIndex: -1,
+  },
+  gravityZone: {
+    position: 'absolute',
+    borderRadius: 12, // Делаем скруглённым, чтобы соответствовать спавнеру
+    zIndex: -2,
   },
 });
 

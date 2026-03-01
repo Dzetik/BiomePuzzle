@@ -1,510 +1,266 @@
-import { useRef, useEffect, useState, useCallback, useMemo } from 'react';
-import { PanResponder, Animated } from 'react-native';
-import { getScreenBounds, clampPosition } from '../utils/constraints';
-import { snapToGrid } from '../utils/gridUtils';
-import { getSpawnerSize } from '../constants/spawner';
-import { isCenterOverSpawner, getSnapToSpawnerPosition } from '../utils/spawnerUtils';
+// ========================================
+// ГЛАВНЫЙ ХУК ДЛЯ УПРАВЛЕНИЯ ПЕРЕТАСКИВАЕМОЙ ПЛИТКОЙ
+// 
+// Собирает все под-хуки вместе:
+// - useTileAnimations: анимации позиции и размера
+// - useTileTargetCell: работа с целевой ячейкой
+// - useTileSpawnerLogic: логика спавнера
+// - useTilePlacement: логика размещения при отпускании
+// - useTileDragHandler: обработка жестов
+// 
+// Возвращает API для компонента TileView
+// ========================================
+
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useZoom } from './useZoom';
-import { useTiles } from '../context/TilesContext';
 import { useGrid } from '../context/GridContext';
 import { useSpawner } from './useSpawner';
-import { getCellSize, findNearestCell, getCellCenter } from '../utils/gridUtils';
+import { getSpawnerSize } from '../constants/spawner';
+import { getSnapToSpawnerPosition } from '../utils/spawnerUtils';
 
-// ========================================
-// Хук для управления перетаскиваемой плиткой
-// Поддерживает: перетаскивание, притягивание к сетке/спавнеру, масштабирование
-// ========================================
+// Импортируем под-хуки из папки useDraggable
+import { useTileAnimations } from './useDraggable/useTileAnimations';
+import { useTileTargetCell } from './useDraggable/useTileTargetCell';
+import { useTileSpawnerLogic } from './useDraggable/useTileSpawnerLogic';
+import { useTilePlacement } from './useDraggable/useTilePlacement';
+import { useTileDragHandler } from './useDraggable/useTileDragHandler';
 
 const useDraggable = (initialPosition = null, tileId = null) => {
-  // Все хуки на верхнем уровне (правила хуков)
-  const { scale } = useZoom(); // Текущий масштаб игры
-  const { isCellOccupied, addTile, moveTile, getTileAt, getAllTiles } = useTiles(); // Работа с плитками в контексте
-  const { offset } = useGrid(); // Смещение виртуальной камеры
-  const spawnerPos = useSpawner(); // Позиция спавнера на экране
+  // ========================================
+  // 1. ПОЛУЧЕНИЕ ДАННЫХ ИЗ КОНТЕКСТОВ
+  // ========================================
   
-  const [isSpawnerReady, setIsSpawnerReady] = useState(false); // Флаг готовности спавнера
-  const scaleRef = useRef(scale); // Реф для доступа к scale в колбэках
-  const offsetRef = useRef(offset); // Реф для доступа к offset в колбэках
+  /**
+   * scale - текущий масштаб (зум) из useZoom
+   * offset - текущее смещение сетки при панорамировании из GridContext
+   * spawnerPos - позиция спавнера на экране из useSpawner
+   */
+  const { scale } = useZoom();
+  const { offset } = useGrid();
+  const spawnerPos = useSpawner();
   
-  // Обновляем ref при изменении offset и scale
-  useEffect(() => {
-    scaleRef.current = scale;
-  }, [scale]); // Срабатывает при изменении масштаба
+  // ========================================
+  // 2. ЛОКАЛЬНЫЕ СОСТОЯНИЯ
+  // ========================================
   
-  useEffect(() => {
-    offsetRef.current = offset;
-  }, [offset]); // Срабатывает при изменении смещения сетки
+  /**
+   * isSpawnerReady - флаг, что спавнер уже имеет корректные координаты
+   * (используется, чтобы не рассчитывать позицию до получения данных)
+   */
+  const [isSpawnerReady, setIsSpawnerReady] = useState(false);
   
-  // Эффект для отслеживания готовности спавнера
+  /**
+   * isInSpawner - флаг нахождения плитки в спавнере
+   * Поднимаем на этот уровень, чтобы передавать во все дочерние хуки
+   */
+  const [isInSpawner, setIsInSpawner] = useState(true);
+  
+  // ========================================
+  // 3. REF ДЛЯ ЦЕЛЕВОЙ ЯЧЕЙКИ
+  // ========================================
+  
+  /**
+   * targetCellRef - ссылка на объект с координатами целевой ячейки {col, row}
+   * или null, если плитка в спавнере
+   * 
+   * ВАЖНО: Создаётся здесь и передаётся во все дочерние хуки,
+   * чтобы все работали с одним и тем же ref
+   */
+  const targetCellRef = useRef(null);
+
+  // ========================================
+  // 4. ОТСЛЕЖИВАНИЕ ГОТОВНОСТИ СПАВНЕРА
+  // ========================================
+  
+  /**
+   * Эффект срабатывает, когда spawnerPos получает корректные координаты
+   * (spawnerPos.size > 0 означает, что спавнер отрисован и известны его размеры)
+   */
   useEffect(() => {
     if (spawnerPos.size > 0) {
+      console.log(`[Tile ${tileId}] Спавнер готов:`, spawnerPos);
       setIsSpawnerReady(true);
     }
-  }, [spawnerPos]); // Срабатывает при получении позиции спавнера
+  }, [spawnerPos, tileId]);
+
+  // ========================================
+  // 5. ВЫЧИСЛЕНИЕ НАЧАЛЬНЫХ ЗНАЧЕНИЙ
+  // ========================================
   
-  const [isInSpawner, setIsInSpawner] = useState(true); // Флаг нахождения плитки в спавнере
+  /**
+   * spawnerSize - размер спавнера из конфига
+   * initialTileSize - начальный размер плитки (равен размеру спавнера)
+   */
+  const spawnerSize = getSpawnerSize();
+  const initialTileSize = { width: spawnerSize, height: spawnerSize };
   
-  // Целевая ячейка плитки - null пока плитка в спавнере
-  // Хранит координаты ячейки, в которой должна находиться плитка
-  const targetCellRef = useRef(null);
-  
-  // Размеры
-  const spawnerSize = getSpawnerSize(); // Получаем размер спавнера из конфига
-  const spawnerTileSize = { width: spawnerSize, height: spawnerSize }; // Размер плитки в спавнере
-  
-  // Функция получения размера плитки под текущий масштаб
-  const getTileSize = useCallback((s) => ({
-    width: getCellSize(s),
-    height: getCellSize(s)
-  }), []); // Зависимостей нет, так как getCellSize - чистая функция
-  
-  // Начальная позиция с проверкой готовности спавнера
-  const startPosition = useMemo(() => {
-    if (initialPosition) return initialPosition; // Если передана начальная позиция, используем её
+  /**
+   * startPosition - начальная позиция плитки
+   * Если передан initialPosition - используем его
+   * Иначе центрируем в спавнере (как только он готов)
+   * Иначе временно ставим в (0,0)
+   */
+  const startPosition = useCallback(() => {
+    if (initialPosition) return initialPosition;
     if (isSpawnerReady) {
-      return getSnapToSpawnerPosition(spawnerTileSize, spawnerPos); // Центрируем в спавнере
+      return getSnapToSpawnerPosition(initialTileSize, spawnerPos);
     }
-    // Возвращаем временную позицию, пока спавнер не готов
     return { x: 0, y: 0 };
-  }, [initialPosition, isSpawnerReady, spawnerPos, spawnerTileSize]); // Пересчитываем при изменении этих значений
+  }, [initialPosition, isSpawnerReady, spawnerPos, initialTileSize])();
+
+  // ========================================
+  // 6. ИНИЦИАЛИЗАЦИЯ ПОД-ХУКОВ
+  // ========================================
   
-  // Анимированные значения
-  const widthAnim = useRef(new Animated.Value(spawnerTileSize.width)).current; // Анимируемая ширина
-  const heightAnim = useRef(new Animated.Value(spawnerTileSize.height)).current; // Анимируемая высота
-  const position = useRef(new Animated.ValueXY(startPosition)).current; // Анимируемая позиция (x, y)
+  /**
+   * ПОРЯДОК ВАЖЕН!
+   * 1. Анимации - базовый слой, создаёт анимированные значения
+   * 2. Спавнер логика - зависит от анимаций
+   * 3. Целевая ячейка - зависит от анимаций и спавнера
+   * 4. Размещение - зависит от всего вышеперечисленного
+   * 5. Обработчик жестов - замыкает всё вместе
+   */
   
-  // Refs для синхронного доступа к текущим значениям (без задержек анимации)
-  const currentTileSize = useRef(spawnerTileSize); // Текущий размер плитки
-  const currentPositionRef = useRef({ x: position.x._value, y: position.y._value }); // Текущая позиция
+  // --- 6.1 Анимации (самый базовый слой) ---
+  const {
+    position,                    // Animated.ValueXY для позиции
+    width,                       // Animated.Value для ширины
+    height,                      // Animated.Value для высоты
+    currentTileSize,             // Ref с актуальным размером
+    currentPositionRef,          // Ref с актуальной позицией
+    animateSize,                 // Функция анимации размера
+    animateToPosition,           // Функция анимации перемещения
+    getTileSize,                 // Функция получения размера под масштаб
+    correctPositionIfNeeded,     // Коррекция позиции перед перетаскиванием
+    updatePositionFromTargetCell, // Обновление по целевой ячейке
+  } = useTileAnimations({
+    tileId,
+    initialPosition: startPosition,
+    initialSize: initialTileSize,
+    scale,
+    offset,
+    isInSpawner,
+    targetCellRef,
+    isSpawnerReady,
+  });
 
+  // --- 6.2 Логика спавнера ---
+  const {
+    spawnerTileSize,             // Размер плитки в спавнере
+    handlePositionChange,        // Обработчик изменения позиции
+    setInSpawner,                // Принудительный вход в спавнер
+    setOutOfSpawner,             // Принудительный выход из спавнера
+    checkIfInSpawner,            // Проверка нахождения в спавнере
+  } = useTileSpawnerLogic({
+    tileId,
+    spawnerPos,
+    isSpawnerReady,
+    currentTileSize,
+    currentPositionRef,
+    animateSize,
+    getTileSize,
+    scale,
+    isInSpawner,
+    setIsInSpawner,
+  });
+
+  // --- 6.3 Логика целевой ячейки ---
+  const {
+    isCellFree,                  // Проверка свободы ячейки
+    tryOccupyCell,               // Попытка занять ячейку
+    releaseCurrentCell,          // Освобождение текущей ячейки
+    updateTargetCellFromPosition, // Обновление целевой ячейки по позиции
+  } = useTileTargetCell({
+    tileId,
+    scale,
+    offset,
+    currentTileSize,
+    currentPositionRef,
+    isInSpawner,
+    setIsInSpawner,
+    targetCellRef,
+    onCellOccupied: (col, row) => { 
+      console.log(`[Tile ${tileId}] Ячейка [${col},${row}] занята`);
+    },
+  });
+
+  // --- 6.4 Логика размещения (при отпускании) ---
+  const {
+    handlePlacement,             // Основная функция размещения
+  } = useTilePlacement({
+    tileId,
+    spawnerPos,
+    currentTileSize,
+    currentPositionRef,
+    isInSpawner,
+    targetCellRef,
+    isCellFree,
+    tryOccupyCell,
+    releaseCurrentCell,
+    setInSpawner,
+    setOutOfSpawner,
+    animateToPosition,
+    scale,
+    offset,
+  });
+
+  // --- 6.5 Обработчик жестов ---
+  const {
+    panHandlers,                 // Обработчики для Animated.View
+  } = useTileDragHandler({
+    tileId,
+    position,
+    currentTileSize,
+    currentPositionRef,
+    correctPositionIfNeeded,
+    onPlacement: handlePlacement,
+    animateToPosition,
+  });
+
+  // ========================================
+  // 7. ПОДКЛЮЧЕНИЕ СЛУШАТЕЛЯ ПОЗИЦИИ
+  // ========================================
+  
   /**
-   * Эффект: при монтировании проверяем, есть ли уже плитка в какой-то ячейке
-   * Если плитка уже была размещена ранее, загружаем её оттуда
+   * Подписываемся на изменения позиции плитки
+   * Каждое изменение передаётся в handlePositionChange,
+   * который проверяет вход/выход из спавнера
    */
   useEffect(() => {
-    if (!isSpawnerReady) return; // Ждём готовности спавнера
-    
-    if (tileId) {
-      const allTiles = getAllTiles(); // Получаем все размещённые плитки
-      const existingTile = allTiles.find(t => t.id === tileId); // Ищем нашу плитку по ID
-      
-      if (existingTile) {
-        // Плитка уже где-то есть - перемещаем её туда
-        console.log(`[Tile ${tileId}] Загружена из ячейки:`, existingTile.col, existingTile.row);
-        targetCellRef.current = { col: existingTile.col, row: existingTile.row };
-        setIsInSpawner(false);
-        
-        // Вычисляем центр целевой ячейки с учётом масштаба и смещения
-        const cellCenter = getCellCenter(
-          existingTile.col, 
-          existingTile.row, 
-          scale, 
-          offset.x, 
-          offset.y
-        );
-        
-        // Вычисляем позицию верхнего левого угла плитки
-        const newPosition = {
-          x: Math.round(cellCenter.x - currentTileSize.current.width / 2),
-          y: Math.round(cellCenter.y - currentTileSize.current.height / 2),
-        };
-        
-        console.log(`[Tile ${tileId}] Установка позиции:`, newPosition);
-        position.setValue(newPosition); // Устанавливаем без анимации
-      } else {
-        console.log(`[Tile ${tileId}] Нет в сохранённых, в спавнере`);
-        
-        // Устанавливаем позицию в спавнере
-        const spawnerPosition = getSnapToSpawnerPosition(currentTileSize.current, spawnerPos);
-        position.setValue(spawnerPosition);
-        
-        // ВАЖНО: Не устанавливаем targetCellRef для плитки в спавнере!
-        targetCellRef.current = null;
-        setIsInSpawner(true);
-      }
-    }
-  }, [tileId, getAllTiles, scale, offset, position, currentTileSize, spawnerPos, isSpawnerReady]);
-
-  /**
-   * Проверяет, свободна ли ячейка
-   * @param {number} col - колонка
-   * @param {number} row - строка
-   * @returns {boolean} true если ячейка свободна или занята этой же плиткой
-   */
-  const isCellFree = useCallback((col, row) => {
-    const tileAtCell = getTileAt(col, row); // Получаем плитку в ячейке
-    return !tileAtCell || tileAtCell.id === tileId; // Свободна или это наша же плитка
-  }, [getTileAt, tileId]);
-
-  /**
-   * Обновляет целевую ячейку по текущей позиции плитки
-   * Вызывается при выходе из спавнера и других случаях
-   */
-  const updateTargetCell = useCallback(() => {
-    const pos = currentPositionRef.current;
-    const size = currentTileSize.current;
-    const currentOffset = offsetRef.current;
-    
-    // Вычисляем центр плитки
-    const center = {
-      x: pos.x + size.width / 2,
-      y: pos.y + size.height / 2
-    };
-    
-    // Находим ближайшую ячейку к центру
-    const cell = findNearestCell(
-      center.x, 
-      center.y, 
-      scaleRef.current,
-      currentOffset.x,
-      currentOffset.y
-    );
-    
-    targetCellRef.current = { col: cell.col, row: cell.row };
-  }, []); // Зависимостей нет, используем refs
-
-  /**
-   * Пытается занять ячейку
-   * @param {number} col - колонка
-   * @param {number} row - строка
-   * @returns {boolean} true если успешно заняли
-   */
-  const tryOccupyCell = useCallback((col, row) => {
-    console.log(`[Tile ${tileId}] Попытка занять ячейку [${col},${row}]`);
-    
-    if (isCellFree(col, row)) {
-      const allTiles = getAllTiles();
-      const existingTile = allTiles.find(t => t.id === tileId); // Ищем, есть ли уже плитка где-то
-      
-      if (existingTile) {
-        // Плитка уже есть в другой ячейке - перемещаем
-        console.log(`[Tile ${tileId}] Перемещение из [${existingTile.col},${existingTile.row}] в [${col},${row}]`);
-        moveTile(existingTile.col, existingTile.row, col, row, { id: tileId, texture: 'test1' });
-      } else {
-        // Новая плитка - добавляем
-        console.log(`[Tile ${tileId}] Добавление в [${col},${row}]`);
-        addTile(col, row, { id: tileId, texture: 'test1' });
-      }
-      return true;
-    }
-    
-    console.log(`[Tile ${tileId}] Ячейка [${col},${row}] занята, отмена`);
-    return false;
-  }, [isCellFree, addTile, moveTile, getAllTiles, tileId]);
-
-  /**
-   * Анимирует изменение размера плитки
-   * @param {Object} targetSize - целевой размер {width, height}
-   */
-  const animateSize = useCallback((targetSize) => {
-    currentTileSize.current = targetSize; // Сразу обновляем ref
-    Animated.parallel([
-      Animated.spring(widthAnim, { 
-        toValue: targetSize.width, 
-        useNativeDriver: false 
-      }),
-      Animated.spring(heightAnim, { 
-        toValue: targetSize.height, 
-        useNativeDriver: false 
-      })
-    ]).start(); // Запускаем параллельную анимацию ширины и высоты
-  }, [widthAnim, heightAnim]);
-
-  /**
-   * Анимирует перемещение плитки в целевую позицию
-   * @param {Object} targetPosition - целевая позиция {x, y}
-   */
-  const animateToPosition = useCallback((targetPosition) => {
-    Animated.spring(position, {
-      toValue: targetPosition,
-      useNativeDriver: false,
-    }).start(); // Плавно перемещаем плитку
-  }, [position]);
-
-  /**
-   * Эффект: при изменении масштаба перемещаем плитку в целевую ячейку
-   * Чтобы плитка оставалась в своей ячейке при зуме
-   */
-  useEffect(() => {
-    if (isInSpawner || !isSpawnerReady) return; // Не обрабатываем для плитки в спавнере
-    
-    // Проверяем, что targetCellRef.current существует
-    if (!targetCellRef.current) {
-      console.log(`[Tile ${tileId}] Нет целевой ячейки для зума`);
-      return;
-    }
-    
-    const newTileSize = getTileSize(scale); // Новый размер под масштаб
-    const currentOffset = offsetRef.current;
-    
-    // Получаем центр целевой ячейки в новом масштабе
-    const cellCenter = getCellCenter(
-      targetCellRef.current.col,
-      targetCellRef.current.row,
-      scale,
-      currentOffset.x,
-      currentOffset.y
-    );
-    
-    // Вычисляем новую позицию верхнего левого угла
-    const newPosition = {
-      x: Math.round(cellCenter.x - newTileSize.width / 2),
-      y: Math.round(cellCenter.y - newTileSize.height / 2),
-    };
-    
-    animateSize(newTileSize);
-    animateToPosition(newPosition);
-    
-  }, [scale, isInSpawner, isSpawnerReady, getTileSize, animateSize, animateToPosition, tileId]);
-
-  /**
-   * Эффект: отслеживание позиции для определения входа/выхода из спавнера
-   * Меняет размер плитки при входе/выходе
-   */
-  useEffect(() => {
-    if (!isSpawnerReady) return;
-    
-    // Подписываемся на изменения позиции
-    const listenerId = position.addListener((value) => {
-      currentPositionRef.current = { x: value.x, y: value.y }; // Обновляем ref
-      
-      // Проверяем, находится ли центр плитки над спавнером
-      const inSpawner = isCenterOverSpawner(value, currentTileSize.current, spawnerPos);
-      
-      if (inSpawner !== isInSpawner) {
-        setIsInSpawner(inSpawner); // Обновляем состояние
-        
-        if (inSpawner) {
-          animateSize(spawnerTileSize); // В спавнере - размер спавнера
-        } else {
-          animateSize(getTileSize(scaleRef.current)); // Вне спавнера - обычный размер
-          // При выходе из спавнера НЕ обновляем targetCellRef
-          // targetCellRef обновится только при отпускании в ячейку
-        }
-      }
+    const listener = position.addListener((value) => {
+      handlePositionChange(value);
     });
     
-    // Отписываемся при размонтировании
-    return () => position.removeListener(listenerId);
-  }, [isInSpawner, spawnerTileSize, getTileSize, animateSize, tileId, position, spawnerPos, isSpawnerReady]);
+    return () => position.removeListener(listener);
+  }, [position, handlePositionChange]);
 
+  // ========================================
+  // 8. СИНХРОНИЗАЦИЯ ЦЕЛЕВОЙ ЯЧЕЙКИ
+  // ========================================
+  
   /**
-   * PanResponder для обработки перетаскивания пальцем
-   * Содержит всю логику жестов: начало, движение, завершение
+   * Если плитка вышла из спавнера, но у неё ещё нет целевой ячейки
+   * (например, при первом выходе), обновляем ячейку по текущей позиции
    */
-  const panResponder = useRef(
-    PanResponder.create({
-      // Разрешаем всегда начинать жест
-      onStartShouldSetPanResponder: () => true,
-      
-      // Начало перетаскивания (палец коснулся)
-      onPanResponderGrant: (_, gesture) => {
-        console.log(`[Tile ${tileId}] Начало перетаскивания`);
-        position.stopAnimation(); // Останавливаем текущую анимацию
-        
-        const currentPos = currentPositionRef.current;
-        const currentOffset = offsetRef.current;
-        
-        // Проверяем, нужно ли скорректировать позицию (после панорамирования)
-        // Только если плитка НЕ в спавнере И есть целевая ячейка
-        if (!isInSpawner && targetCellRef.current) {
-          const targetCell = targetCellRef.current;
-          // Вычисляем, где должна быть плитка в идеале
-          const cellCenter = getCellCenter(
-            targetCell.col,
-            targetCell.row,
-            scaleRef.current,
-            currentOffset.x,
-            currentOffset.y
-          );
-          
-          const expectedPosition = {
-            x: Math.round(cellCenter.x - currentTileSize.current.width / 2),
-            y: Math.round(cellCenter.y - currentTileSize.current.height / 2),
-          };
-          
-          // Если позиции не совпадают больше чем на 1px, корректируем
-          if (Math.abs(expectedPosition.x - currentPos.x) > 1 || 
-              Math.abs(expectedPosition.y - currentPos.y) > 1) {
-            console.log(`[Tile ${tileId}] Корректировка позиции после панорамирования`);
-            position.setValue(expectedPosition);
-            currentPositionRef.current = expectedPosition;
-          }
-        }
-        
-        const adjustedPos = currentPositionRef.current; // Берём актуальную позицию
-        
-        // Сохраняем данные для перетаскивания
-        dragData.current = {
-          basePosition: { ...adjustedPos }, // Базовая позиция в момент касания
-          touchOffset: {
-            x: gesture.x0 - adjustedPos.x, // Смещение точки касания от угла плитки по X
-            y: gesture.y0 - adjustedPos.y, // Смещение точки касания от угла плитки по Y
-          },
-        };
-      },
-      
-      // Движение пальца
-      onPanResponderMove: (_, gesture) => {
-        const { basePosition, touchOffset } = dragData.current;
-        
-        // Вычисляем новую позицию: точка касания - смещение
-        // gesture.x0 + gesture.dx - текущая позиция пальца
-        const newPosition = {
-          x: gesture.x0 + gesture.dx - touchOffset.x,
-          y: gesture.y0 + gesture.dy - touchOffset.y,
-        };
-        
-        // Ограничиваем позицию экраном
-        const bounds = getScreenBounds(
-          currentTileSize.current.width,
-          currentTileSize.current.height
-        );
-        const clampedPosition = clampPosition(newPosition, bounds);
-        position.setValue(clampedPosition); // Мгновенно обновляем позицию
-      },
-      
-      // Завершение перетаскивания (палец отпущен)
-      onPanResponderRelease: () => {
-        console.log(`[Tile ${tileId}] Завершение перетаскивания`);
-        const currentPos = currentPositionRef.current;
-        if (!currentPos) return;
-        
-        const currentOffset = offsetRef.current;
-        
-        // Вычисляем центр плитки
-        const centerX = currentPos.x + currentTileSize.current.width / 2;
-        const centerY = currentPos.y + currentTileSize.current.height / 2;
-        
-        // Вычисляем центр спавнера
-        const spawnerCenterX = spawnerPos.x + spawnerPos.size / 2;
-        const spawnerCenterY = spawnerPos.y + spawnerPos.size / 2;
-        
-        // Расстояние от центра плитки до центра спавнера
-        const distanceToSpawner = Math.sqrt(
-          Math.pow(centerX - spawnerCenterX, 2) + 
-          Math.pow(centerY - spawnerCenterY, 2)
-        );
-        
-        // Порог для притягивания к спавнеру (2 размера спавнера)
-        // Если плитка ближе этого расстояния - летит в спавнер
-        const spawnerThreshold = spawnerPos.size * 2;
-        
-        // ЕСЛИ ПЛИТКА БЛИЗКО К СПАВНЕРУ - ПРИТЯГИВАЕМ К СПАВНЕРУ
-        if (distanceToSpawner < spawnerThreshold) {
-          console.log(`[Tile ${tileId}] ПРИТЯГИВАЕМ К СПАВНЕРУ!`);
-          
-          // Получаем позицию для центрирования в спавнере
-          const spawnerPosition = getSnapToSpawnerPosition(currentTileSize.current, spawnerPos);
-          
-          // Если плитка была в сетке, удаляем её оттуда
-          if (!isInSpawner && targetCellRef.current) {
-            const allTiles = getAllTiles();
-            const existingTile = allTiles.find(t => t.id === tileId);
-            if (existingTile) {
-              console.log(`[Tile ${tileId}] Удаляем из ячейки [${existingTile.col},${existingTile.row}]`);
-              removeTile(existingTile.col, existingTile.row); // Удаляем из контекста
-            }
-          }
-          
-          // Перемещаем в спавнер
-          animateToPosition(spawnerPosition);
-          setIsInSpawner(true);
-          targetCellRef.current = null; // Сбрасываем целевую ячейку
-          
-          dragData.current = { basePosition: null, touchOffset: null };
-          return; // Завершаем обработку
-        }
-        
-        // ИНАЧЕ - ПРИТЯГИВАЕМ К СЕТКЕ
-        console.log(`[Tile ${tileId}] Притягиваем к сетке`);
-        
-        // Используем snapToGrid для притягивания к сетке
-        const snappedPosition = snapToGrid(
-          currentPos, 
-          currentTileSize.current, 
-          scaleRef.current,
-          currentOffset.x,
-          currentOffset.y
-        );
-        
-        // Вычисляем центр после притягивания
-        const snappedCenter = {
-          x: snappedPosition.x + currentTileSize.current.width / 2,
-          y: snappedPosition.y + currentTileSize.current.height / 2
-        };
-        
-        // Находим целевую ячейку по центру
-        const targetCell = findNearestCell(
-          snappedCenter.x, 
-          snappedCenter.y, 
-          scaleRef.current,
-          currentOffset.x,
-          currentOffset.y
-        );
-        
-        console.log(`[Tile ${tileId}] Целевая ячейка: [${targetCell.col},${targetCell.row}]`);
-        
-        // Пытаемся занять ячейку
-        if (isCellFree(targetCell.col, targetCell.row)) {
-          // Ячейка свободна
-          const allTiles = getAllTiles();
-          const existingTile = allTiles.find(t => t.id === tileId);
-          
-          if (existingTile) {
-            // Перемещаем существующую плитку
-            moveTile(existingTile.col, existingTile.row, targetCell.col, targetCell.row, { id: tileId, texture: 'test1' });
-          } else {
-            // Добавляем новую плитку
-            addTile(targetCell.col, targetCell.row, { id: tileId, texture: 'test1' });
-          }
-          
-          animateToPosition(snappedPosition); // Анимируем перемещение
-          targetCellRef.current = { col: targetCell.col, row: targetCell.row }; // Запоминаем ячейку
-          setIsInSpawner(false); // Теперь плитка не в спавнере
-        } else {
-          // Ячейка занята - возвращаемся
-          console.log(`[Tile ${tileId}] Ячейка занята, возврат`);
-          
-          if (!isInSpawner && targetCellRef.current) {
-            // Возврат в предыдущую ячейку
-            const prevCellCenter = getCellCenter(
-              targetCellRef.current.col,
-              targetCellRef.current.row,
-              scaleRef.current,
-              currentOffset.x,
-              currentOffset.y
-            );
-            const prevPosition = {
-              x: prevCellCenter.x - currentTileSize.current.width / 2,
-              y: prevCellCenter.y - currentTileSize.current.height / 2,
-            };
-            animateToPosition(prevPosition);
-          } else {
-            // Возврат в спавнер
-            const spawnerPosition = getSnapToSpawnerPosition(currentTileSize.current, spawnerPos);
-            animateToPosition(spawnerPosition);
-          }
-        }
-      },
-      
-      // Жест прерван (например, системным уведомлением)
-      onPanResponderTerminate: () => {
-        dragData.current = { basePosition: null, touchOffset: null };
-      },
-    })
-  ).current;
+  useEffect(() => {
+    if (!isInSpawner && !targetCellRef.current) {
+      updateTargetCellFromPosition();
+    }
+  }, [isInSpawner, targetCellRef, updateTargetCellFromPosition]);
 
-  // Данные для перетаскивания (внутреннее состояние хука)
-  const dragData = useRef({ basePosition: null, touchOffset: null });
-
-  // Возвращаем API для компонента
+  // ========================================
+  // 9. ВОЗВРАЩАЕМЫЙ API
+  // ========================================
+  
+  /**
+   * Всё, что нужно компоненту TileView для отрисовки и взаимодействия
+   */
   return {
-    position,           // Animated.ValueXY для позиции
-    width: widthAnim,   // Animated.Value для ширины
-    height: heightAnim, // Animated.Value для высоты
-    panHandlers: panResponder.panHandlers, // Обработчики жестов для View
-    isInSpawner,        // Флаг нахождения в спавнере
+    position,        // Animated.ValueXY - позиция плитки
+    width,           // Animated.Value - ширина плитки
+    height,          // Animated.Value - высота плитки
+    panHandlers,     // Обработчики жестов для Animated.View
+    isInSpawner,     // Флаг для отладки (можно показать на экране)
   };
 };
 

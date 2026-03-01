@@ -10,8 +10,19 @@ import { GridProvider } from './src/context/GridContext';
 import { TilesProvider } from './src/context/TilesContext';
 import { getSnapToSpawnerPosition } from './src/utils/spawnerUtils'; 
 import { getSpawnerSize } from './src/constants/spawner';
+import { useSpawner } from './src/hooks/useSpawner';
 
 const testTexture = require('./assets/images/textures/test1.png');
+
+if (__DEV__) {
+  const originalConsoleError = console.error;
+  console.error = (...args) => {
+    if (args[0] && args[0].stack) {
+      console.log('FULL STACK:', args[0].stack);
+    }
+    originalConsoleError.apply(console, args);
+  };
+}
 
 // Компонент с жестом зума
 const ZoomHandler = ({ children }) => {
@@ -42,8 +53,9 @@ const ZoomHandler = ({ children }) => {
 
 const GameContent = () => {
   const spawnerSize = getSpawnerSize();
+  const spawnerPos = useSpawner(); 
   const initialTileSize = { width: spawnerSize, height: spawnerSize };
-  const initialPosition = getSnapToSpawnerPosition(initialTileSize);
+  const initialPosition = getSnapToSpawnerPosition(initialTileSize, spawnerPos);
   
   // Исправлено: получаем panHandlers из хука
   const { position, width, height, panHandlers } = useDraggable(initialPosition, 'tile-1');
