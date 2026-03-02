@@ -66,7 +66,10 @@ const PlacedTiles = () => {
     <>
       {tiles.map((tile) => {
         const cellSize = DEFAULT_TILE_SIZE.width;
-        const tileSize = { width: cellSize, height: cellSize };
+        const tileSize = { 
+          width: cellSize * scale, 
+          height: cellSize * scale 
+        };
         
         const position = getSnapToCellPosition(
           tileSize,
@@ -82,8 +85,8 @@ const PlacedTiles = () => {
             key={tile.id}
             textureSource={testTexture}
             position={position}
-            width={cellSize}
-            height={cellSize}
+            width={cellSize * scale}
+            height={cellSize * scale}
             panHandlers={{}}
             tileId={tile.id}
           />
@@ -148,7 +151,6 @@ const GameContent = () => {
         <TileView 
           textureSource={testTexture}
           position={draggableTile.position}
-          // ✅ Размер всегда из анимации (корректный для текущего состояния)
           width={draggableTile.width}
           height={draggableTile.height}
           panHandlers={draggableTile.panHandlers}

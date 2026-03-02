@@ -72,6 +72,11 @@ export const useTileAnimations = ({
    * @param {boolean} immediate - true = мгновенно, false = плавно
    */
   const animateSize = useCallback((targetSize, immediate = false) => {
+    if (currentTileSize.current.width === targetSize.width && 
+        currentTileSize.current.height === targetSize.height) {
+      return;  // Размер уже правильный, ничего не делаем
+    }
+    
     console.log(`[Tile ${tileId}] animateSize:`, targetSize, immediate ? 'immediate' : 'animated');
     
     // Сразу обновляем ref для синхронного доступа

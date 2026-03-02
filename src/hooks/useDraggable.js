@@ -39,6 +39,17 @@ const useDraggable = (initialTileData = null, tileId = null, externalInitialPosi
   );
   const [initialPositionSet, setInitialPositionSet] = useState(false);
   
+  useEffect(() => {
+    if (currentTileData?.id && spawnerPos?.size > 0) {
+      const newStartPos = {
+        x: spawnerPos.x,
+        y: spawnerPos.y,
+      };
+      console.log('[useDraggable] Сброс startPosition для новой плитки:', newStartPos);
+      setStartPosition(newStartPos);
+    }
+  }, [currentTileData?.id, spawnerPos]);
+
   const targetCellRef = useRef(null);
   const spawnerSize = getSpawnerSize();
 
@@ -158,39 +169,43 @@ const useDraggable = (initialTileData = null, tileId = null, externalInitialPosi
     const newTile = createSpawnerTile();
     console.log(`[Tile] Создана новая плитка в спавнере: ${newTile?.id}`);
     
-    // ✅ 1. СНАЧАЛА устанавливаем isInSpawner
-    setIsInSpawner(true);
+    // ✅ 1. Сбрасываем целевую ячейку
     targetCellRef.current = null;
     
-    // ✅ 2. Устанавливаем флаг "свежей" плитки (защита от ложного выхода)
-    isFreshSpawnerTileRef.current = true;
-    
-    // ✅ 3. Обновляем данные плитки
+    // ✅ 2. Обновляем данные плитки (сразу, чтобы новая плитка отрисовалась)
     setCurrentTileData(newTile);
     returnTileToSpawner(newTile);
     
-    // ✅ 4. СБРОС РАЗМЕРА СРАЗУ (синхронно, не в setTimeout!)
-    const spawnerSize = { width: getSpawnerSize(), height: getSpawnerSize() };
-    animations.animateSize(spawnerSize, true);  // true = мгновенно
-    console.log('[Tile] Мгновенный сброс размера:', spawnerSize);
+    // ❌ УБРАЛИ: setIsInSpawner(true) отсюда!
+    // ❌ УБРАЛИ: animateSize отсюда!
     
-    // ✅ 5. Позиция в setTimeout (ждёт обновления состояния)
+    // ✅ 3. Позиция + isInSpawner + animateSize ВСЁ в setTimeout
     setTimeout(() => {
       if (spawnerPos && animations.position) {
         const spawnerPosition = {
-          x: spawnerPos.x + (spawnerPos.size - getSpawnerSize()) / 2,
-          y: spawnerPos.y + (spawnerPos.size - getSpawnerSize()) / 2,
+          x: spawnerPos.x,
+          y: spawnerPos.y,
         };
         console.log('[Tile] Сброс позиции новой плитки в спавнер:', spawnerPosition);
         animations.position.setValue(spawnerPosition);
       }
-    }, 100);
-    
-    // ✅ 6. Сбрасываем флаг через 500мс
-    setTimeout(() => {
-      isFreshSpawnerTileRef.current = false;
-      console.log('[Tile] Сброс флага isFreshSpawnerTileRef');
-    }, 500);
+      
+      // ✅ 4. ТОЛЬКО ТЕПЕРЬ устанавливаем isInSpawner (старая плитка уже размещена)
+      setIsInSpawner(true);
+      console.log('[Tile] setIsInSpawner(true) - старая плитка уже размещена');
+      
+      // ✅ 5. И сразу размер для новой плитки
+      const spawnerSize = { width: getSpawnerSize(), height: getSpawnerSize() };
+      animations.animateSize(spawnerSize, true);
+      console.log('[Tile] Мгновенный сброс размера:', spawnerSize);
+      
+      // ✅ 6. Сброс флага isFreshSpawnerTileRef
+      setTimeout(() => {
+        isFreshSpawnerTileRef.current = false;
+        console.log('[Tile] Сброс флага isFreshSpawnerTileRef');
+      }, 500);
+      
+    }, 400);  // ✅ 400мс = время анимации размещения старой плитки
     
   }, [createSpawnerTile, returnTileToSpawner, targetCellRef, setIsInSpawner, spawnerPos, animations.position, animations.animateSize, getSpawnerSize]);
 

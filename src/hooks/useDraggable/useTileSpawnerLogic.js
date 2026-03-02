@@ -138,10 +138,15 @@ export const useTileSpawnerLogic = ({
   }, [isInSpawner, updateSizeForSpawner, getLogId]);
 
   useEffect(() => {
+    // ✅ Пропускаем если плитка только что создана (ещё не устоялась)
+    if (isFreshSpawnerTileRef.current) {
+      return;
+    }
+    
     if (!isInSpawner && isSpawnerReady) {
       updateSizeForSpawner(false, false);
     }
-  }, [scale, isInSpawner, isSpawnerReady, updateSizeForSpawner]);
+  }, [scale, isInSpawner, isSpawnerReady, updateSizeForSpawner, isFreshSpawnerTileRef]);
 
   // ========================================
   // ПРИНУДИТЕЛЬНОЕ УПРАВЛЕНИЕ СОСТОЯНИЕМ
