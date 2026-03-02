@@ -1,32 +1,21 @@
 import React, { createContext, useContext, useState, useCallback } from 'react';
 
-// Константы для генерации ID плиток
 const TILE_ID_PREFIX = 'tile';
 let tileCounter = 1;
 
-// Генератор уникального ID для плитки
 const generateTileId = () => `${TILE_ID_PREFIX}-${Date.now()}-${tileCounter++}`;
 
 const TilesContext = createContext(null);
 
 export const TilesProvider = ({ children }) => {
-  // Все размещённые на сетке плитки
   const [placedTiles, setPlacedTiles] = useState(new Map());
-  
-  // Плитка в спавнере (всегда одна)
   const [spawnerTile, setSpawnerTile] = useState(null);
-
-  // ========================================
-  // УПРАВЛЕНИЕ ПЛИТКАМИ В СЕТКЕ
-  // ========================================
 
   const addTile = useCallback((col, row, tileData) => {
     const key = `${col},${row}`;
     setPlacedTiles(prev => {
       const newMap = new Map(prev);
       
-      // Важно: если плитка с таким ID уже есть где-то, удаляем её оттуда
-      // Это гарантирует, что у плитки только одна запись
       const existingEntry = Array.from(newMap.entries()).find(
         ([_, value]) => value.id === tileData.id
       );
@@ -58,11 +47,8 @@ export const TilesProvider = ({ children }) => {
     
     setPlacedTiles(prev => {
       const newMap = new Map(prev);
-      
-      // Убеждаемся, что удаляем именно старую запись
       newMap.delete(fromKey);
       
-      // Также удаляем любую другую запись с этим ID (на всякий случай)
       const otherEntries = Array.from(newMap.entries()).filter(
         ([_, value]) => value.id === tileData.id
       );
@@ -71,7 +57,6 @@ export const TilesProvider = ({ children }) => {
         console.log(`[Tiles] Удалена дублирующаяся запись ${key}`);
       });
       
-      // Добавляем на новое место
       newMap.set(toKey, { ...tileData, col: toCol, row: toRow });
       
       console.log(`[Tiles] Перемещена плитка ${tileData.id} из [${fromCol},${fromRow}] в [${toCol},${toRow}]`);
@@ -79,20 +64,10 @@ export const TilesProvider = ({ children }) => {
     });
   }, []);
 
-  // ========================================
-  // УПРАВЛЕНИЕ ПЛИТКОЙ В СПАВНЕРЕ
-  // ========================================
-
-  /**
-   * Создаёт новую плитку в спавнере
-   * @param {Object} tileData - данные плитки (опционально, если нужно создать с определёнными параметрами)
-   * @returns {Object} созданная плитка
-   */
   const createSpawnerTile = useCallback((tileData = null) => {
     const newTile = tileData || {
       id: generateTileId(),
-      texture: 'test1.png', // По умолчанию, можно передавать нужную текстуру
-      // Другие свойства плитки можно добавить позже
+      texture: 'test1.png',
     };
     
     console.log(`[Tiles] Создана новая плитка в спавнере: ${newTile.id}`);
@@ -100,18 +75,11 @@ export const TilesProvider = ({ children }) => {
     return newTile;
   }, []);
 
-  /**
-   * Удаляет плитку из спавнера
-   */
   const removeSpawnerTile = useCallback(() => {
     console.log('[Tiles] Плитка удалена из спавнера');
     setSpawnerTile(null);
   }, []);
 
-  /**
-   * Забирает плитку из спавнера для размещения в сетке
-   * @returns {Object|null} плитка или null, если спавнер пуст
-   */
   const takeTileFromSpawner = useCallback(() => {
     if (!spawnerTile) {
       console.log('[Tiles] Попытка взять плитку из пустого спавнера');
@@ -121,37 +89,24 @@ export const TilesProvider = ({ children }) => {
     const tile = spawnerTile;
     console.log(`[Tiles] Плитка ${tile.id} взята из спавнера`);
     
-    // Не удаляем сразу, чтобы плитка могла быть перетащена
-    // Она удалится из спавнера только при успешном размещении
+    // ✅ Очищаем спавнер при взятии
+    setSpawnerTile(null);
+    
     return tile;
   }, [spawnerTile]);
 
-  /**
-   * Возвращает плитку в спавнер
-   * @param {Object} tileData - данные возвращаемой плитки
-   */
   const returnTileToSpawner = useCallback((tileData) => {
     console.log(`[Tiles] Плитка ${tileData.id} возвращена в спавнер`);
     setSpawnerTile(tileData);
   }, []);
 
-  /**
-   * Проверяет, есть ли плитка в спавнере
-   */
   const hasTileInSpawner = useCallback(() => {
     return spawnerTile !== null;
   }, [spawnerTile]);
 
-  /**
-   * Получает плитку из спавнера
-   */
   const getSpawnerTile = useCallback(() => {
     return spawnerTile;
   }, [spawnerTile]);
-
-  // ========================================
-  // ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
-  // ========================================
 
   const isCellOccupied = useCallback((col, row) => {
     const key = `${col},${row}`;
@@ -190,7 +145,6 @@ export const TilesProvider = ({ children }) => {
   }, [placedTiles]);
 
   const value = {
-    // Плитки в сетке
     placedTiles,
     addTile,
     removeTile,
@@ -199,8 +153,6 @@ export const TilesProvider = ({ children }) => {
     getTileAt,
     getAllTiles,
     getOccupiedBounds,
-    
-    // Плитка в спавнере
     spawnerTile,
     createSpawnerTile,
     removeSpawnerTile,

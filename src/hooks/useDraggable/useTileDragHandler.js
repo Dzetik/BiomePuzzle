@@ -1,7 +1,3 @@
-// ========================================
-// Хук для обработки жестов перетаскивания плитки
-// ========================================
-
 import { useRef, useCallback } from 'react';
 import { PanResponder } from 'react-native';
 import { getScreenBounds, clampPosition } from '../../utils/constraints';
@@ -14,28 +10,32 @@ export const useTileDragHandler = ({
   correctPositionIfNeeded,
   onPlacement,
   animateToPosition,
+  acquireTileFromSpawner,
 }) => {
   
   const dragData = useRef({
     basePosition: null,
     touchOffset: null,
-    tileIdAtStart: null, // Сохраняем ID в момент начала
+    tileIdAtStart: null,
   });
 
   const handleGrant = useCallback((_, gesture) => {
-    // Получаем ID в момент начала перетаскивания
     const currentId = getTileId ? getTileId() : null;
     const logId = currentId || 'unknown';
     
     console.log(`[Tile ${logId}] Начало перетаскивания`);
     console.log(`[Tile ${logId}] ID в момент старта:`, currentId);
     
+    // ✅ Вызов функции взятия плитки из спавнера
+    if (typeof acquireTileFromSpawner === 'function') {
+      acquireTileFromSpawner();
+    }
+    
     position.stopAnimation();
     
     const currentPos = currentPositionRef.current;
     console.log(`[Tile ${logId}] Текущая позиция:`, currentPos);
     
-    // Сохраняем ID вместе с данными перетаскивания
     dragData.current = {
       basePosition: { ...currentPos },
       touchOffset: {
@@ -47,7 +47,7 @@ export const useTileDragHandler = ({
     
     console.log(`[Tile ${logId}] Базовая позиция:`, currentPos);
     console.log(`[Tile ${logId}] Смещение касания:`, dragData.current.touchOffset);
-  }, [position, currentPositionRef, getTileId]);
+  }, [position, currentPositionRef, getTileId, acquireTileFromSpawner]);
 
   const handleMove = useCallback((_, gesture) => {
     const { basePosition, touchOffset } = dragData.current;
@@ -69,7 +69,6 @@ export const useTileDragHandler = ({
   }, [position, currentTileSize]);
 
   const handleRelease = useCallback(() => {
-    // Используем сохранённый ID из начала перетаскивания
     const { tileIdAtStart } = dragData.current;
     const logId = tileIdAtStart || 'unknown';
     

@@ -1,7 +1,3 @@
-// ========================================
-// ХУК РАЗМЕЩЕНИЯ ПЛИТКИ - ИСПРАВЛЕННАЯ ВЕРСИЯ
-// ========================================
-
 import { useCallback, useRef } from 'react';
 import { useZoom } from '../useZoom';
 import { useGrid } from '../../context/GridContext';
@@ -9,7 +5,8 @@ import { findNearestCell, getSnapToCellPosition } from '../../utils/gridUtils';
 import { getSnapToSpawnerPosition, isInGravityZone } from '../../utils/spawnerUtils';
 
 export const useTilePlacement = ({
-  getTileId,                    // Функция для получения актуального ID (НОВЫЙ ПАРАМЕТР)
+  getTileId,
+  getTileData,
   spawnerPos,
   currentTileSize,
   currentPositionRef,
@@ -22,7 +19,6 @@ export const useTilePlacement = ({
   setOutOfSpawner,
   animateToPosition,
   onTilePlaced,
-  tileData,
 }) => {
   
   const { scale } = useZoom();
@@ -36,17 +32,15 @@ export const useTilePlacement = ({
   scaleRef.current = scale;
   offsetRef.current = offset;
 
-  // Функция для получения ID для логов
   const getLogId = useCallback(() => {
-    const id = getTileId ? getTileId() : tileData?.id;
+    const id = getTileId ? getTileId() : null;
     return id || 'unknown';
-  }, [getTileId, tileData?.id]);
+  }, [getTileId]);
 
-  // Функция для получения ID для операций
   const getActualId = useCallback(() => {
-    const id = getTileId ? getTileId() : tileData?.id;
+    const id = getTileId ? getTileId() : null;
     return id || null;
-  }, [getTileId, tileData?.id]);
+  }, [getTileId]);
 
   const checkGravityZone = useCallback((position) => {
     return isInGravityZone(
@@ -124,8 +118,10 @@ export const useTilePlacement = ({
         setOutOfSpawner(true);
         wasPlacedRef.current = true;
         
-        if (onTilePlaced && tileData) {
-          onTilePlaced(tileData, targetCell);
+        const currentTileData = getTileData ? getTileData() : null;
+        if (onTilePlaced && currentTileData) {
+          console.log(`[Tile ${actualId}] Вызов onTilePlaced с tileData:`, currentTileData.id);
+          onTilePlaced(currentTileData, targetCell);
         }
         
         return snappedPosition;
@@ -134,7 +130,7 @@ export const useTilePlacement = ({
     
     console.log(`[Tile ${actualId}] Ячейка занята или ошибка, возврат`);
     return null;
-  }, [currentPositionRef, currentTileSize, isCellFree, tryOccupyCell, setOutOfSpawner, onTilePlaced, tileData, getActualId, getLogId]);
+  }, [currentPositionRef, currentTileSize, isCellFree, tryOccupyCell, setOutOfSpawner, onTilePlaced, getTileData, getActualId, getLogId]);
 
   const revertToPrevious = useCallback(() => {
     const logId = getLogId();
@@ -159,30 +155,29 @@ export const useTilePlacement = ({
   }, [isInSpawner, targetCellRef, currentTileSize, spawnerPos, getLogId]);
 
   const handlePlacement = useCallback(() => {
-  const currentPos = currentPositionRef.current;
-  const inGravityZone = checkGravityZone(currentPos);
-  
-  // ПОЛУЧАЕМ ID В МОМЕНТ ВЫЗОВА
-  const actualId = getTileId ? getTileId() : null;
-  const logId = actualId || 'unknown';
-  
-  console.log(`[Tile ${logId}] В зоне притяжения:`, inGravityZone);
-  console.log(`[Tile ${logId}] Реальный ID:`, actualId);
-  
-  if (inGravityZone) {
-    wasPlacedRef.current = false;
-    return snapToSpawner();
-  }
-  
-  const gridPosition = snapToGridAndPlace();
-  
-  if (gridPosition) {
-    return gridPosition;
-  } else {
-    wasPlacedRef.current = false;
-    return revertToPrevious();
-  }
-}, [currentPositionRef, checkGravityZone, snapToSpawner, snapToGridAndPlace, revertToPrevious, getTileId]);
+    const currentPos = currentPositionRef.current;
+    const inGravityZone = checkGravityZone(currentPos);
+    
+    const actualId = getTileId ? getTileId() : null;
+    const logId = actualId || 'unknown';
+    
+    console.log(`[Tile ${logId}] В зоне притяжения:`, inGravityZone);
+    console.log(`[Tile ${logId}] Реальный ID:`, actualId);
+    
+    if (inGravityZone) {
+      wasPlacedRef.current = false;
+      return snapToSpawner();
+    }
+    
+    const gridPosition = snapToGridAndPlace();
+    
+    if (gridPosition) {
+      return gridPosition;
+    } else {
+      wasPlacedRef.current = false;
+      return revertToPrevious();
+    }
+  }, [currentPositionRef, checkGravityZone, snapToSpawner, snapToGridAndPlace, revertToPrevious, getTileId]);
 
   return {
     handlePlacement,
