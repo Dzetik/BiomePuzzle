@@ -1,118 +1,116 @@
 // ========================================
 // ГЛАВНЫЙ ХУК ДЛЯ УПРАВЛЕНИЯ ПЕРЕТАСКИВАЕМОЙ ПЛИТКОЙ
-// 
-// Собирает все под-хуки вместе:
-// - useTileAnimations: анимации позиции и размера
-// - useTileTargetCell: работа с целевой ячейкой
-// - useTileSpawnerLogic: логика спавнера
-// - useTilePlacement: логика размещения при отпускании
-// - useTileDragHandler: обработка жестов
-// 
-// Возвращает API для компонента TileView
 // ========================================
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useZoom } from './useZoom';
 import { useGrid } from '../context/GridContext';
 import { useSpawner } from './useSpawner';
+import { useTiles } from '../context/TilesContext';
 import { getSpawnerSize } from '../constants/spawner';
-import { getSnapToSpawnerPosition } from '../utils/spawnerUtils';
 
-// Импортируем под-хуки из папки useDraggable
+// Импортируем под-хуки
 import { useTileAnimations } from './useDraggable/useTileAnimations';
 import { useTileTargetCell } from './useDraggable/useTileTargetCell';
 import { useTileSpawnerLogic } from './useDraggable/useTileSpawnerLogic';
 import { useTilePlacement } from './useDraggable/useTilePlacement';
 import { useTileDragHandler } from './useDraggable/useTileDragHandler';
 
-const useDraggable = (initialPosition = null, tileId = null) => {
-  // ========================================
-  // 1. ПОЛУЧЕНИЕ ДАННЫХ ИЗ КОНТЕКСТОВ
-  // ========================================
-  
-  /**
-   * scale - текущий масштаб (зум) из useZoom
-   * offset - текущее смещение сетки при панорамировании из GridContext
-   * spawnerPos - позиция спавнера на экране из useSpawner
-   */
+const useDraggable = (initialTileData = null, tileId = null, externalInitialPosition = null) => {
+  // Все хуки вызываются безусловно
   const { scale } = useZoom();
   const { offset } = useGrid();
   const spawnerPos = useSpawner();
   
-  // ========================================
-  // 2. ЛОКАЛЬНЫЕ СОСТОЯНИЯ
-  // ========================================
+  const { 
+    returnTileToSpawner,
+    createSpawnerTile,
+  } = useTiles();
   
-  /**
-   * isSpawnerReady - флаг, что спавнер уже имеет корректные координаты
-   * isInSpawner - флаг нахождения плитки в спавнере
-   */
   const [isSpawnerReady, setIsSpawnerReady] = useState(false);
   const [isInSpawner, setIsInSpawner] = useState(true);
   
-  // ========================================
-  // 3. REF ДЛЯ ЦЕЛЕВОЙ ЯЧЕЙКИ
-  // ========================================
+  // Инициализируем currentTileData данными из пропсов
+  const [currentTileData, setCurrentTileData] = useState(initialTileData);
   
-  /**
-   * targetCellRef - единый ref для всех под-хуков
-   * Содержит {col, row} или null (если плитка в спавнере)
-   */
+  // Обновляем currentTileData когда приходят новые данные из пропсов
+  useEffect(() => {
+    if (initialTileData?.id && initialTileData.id !== currentTileData?.id) {
+      console.log('[useDraggable] Обновление currentTileData:', initialTileData.id);
+      setCurrentTileData(initialTileData);
+    }
+  }, [initialTileData, currentTileData]);
+
+  const [startPosition, setStartPosition] = useState(
+    externalInitialPosition || { x: 0, y: 0 }
+  );
+  const [initialPositionSet, setInitialPositionSet] = useState(false);
+  
   const targetCellRef = useRef(null);
 
-  // ========================================
-  // 4. ОТСЛЕЖИВАНИЕ ГОТОВНОСТИ СПАВНЕРА
-  // ========================================
+  const spawnerSize = getSpawnerSize();
+
+  // Функция получения ID с приоритетом (для рендера)
+  const getCurrentTileId = useCallback(() => {
+    if (currentTileData?.id) {
+      if (currentTileData.id !== 'temp' && currentTileData.id.startsWith('tile-')) {
+        return currentTileData.id;
+      }
+    }
+    
+    if (tileId) {
+      if (tileId !== 'temp' && tileId.startsWith('tile-')) {
+        return tileId;
+      }
+    }
+    
+    return null;
+  }, [currentTileData, tileId]);
+
+  // Ref для хранения актуального ID (для колбэков)
+  const currentTileIdRef = useRef(null);
   
+  // Обновляем ref когда меняется ID
   useEffect(() => {
-    if (spawnerPos.size > 0) {
-      console.log(`[Tile ${tileId}] Спавнер готов:`, spawnerPos);
+    const id = getCurrentTileId();
+    if (id) {
+      console.log('[useDraggable] Обновление ref ID:', id);
+      currentTileIdRef.current = id;
+    }
+  }, [getCurrentTileId]);
+
+  // Функция получения ID через ref (всегда актуально для колбэков)
+  const getCurrentTileIdRef = useCallback(() => {
+    return currentTileIdRef.current;
+  }, []);
+
+  const currentTileId = getCurrentTileId();
+  const isValid = !!currentTileId;
+  
+  // Отслеживаем готовность спавнера
+  useEffect(() => {
+    if (spawnerPos && spawnerPos.size > 0) {
+      const logId = currentTileId || 'unknown';
+      console.log(`[Tile ${logId}] Спавнер готов:`, spawnerPos);
       setIsSpawnerReady(true);
     }
-  }, [spawnerPos, tileId]);
+  }, [spawnerPos, currentTileId]);
 
-  // ========================================
-  // 5. ВЫЧИСЛЕНИЕ НАЧАЛЬНЫХ ЗНАЧЕНИЙ
-  // ========================================
-  
-  const spawnerSize = getSpawnerSize();
-  const initialTileSize = { width: spawnerSize, height: spawnerSize };
-  
-  /**
-   * startPosition - начальная позиция плитки
-   * Центрируем в спавнере, как только он готов
-   */
-  const startPosition = useCallback(() => {
-    if (initialPosition) return initialPosition;
-    if (isSpawnerReady) {
-      return getSnapToSpawnerPosition(initialTileSize, spawnerPos);
+  // Обновляем начальную позицию когда спавнер готов (только один раз)
+  useEffect(() => {
+    if (isSpawnerReady && externalInitialPosition && !initialPositionSet) {
+      const logId = currentTileId || 'unknown';
+      console.log(`[Tile ${logId}] Устанавливаем начальную позицию:`, externalInitialPosition);
+      setStartPosition(externalInitialPosition);
+      setInitialPositionSet(true);
     }
-    return { x: 0, y: 0 };
-  }, [initialPosition, isSpawnerReady, spawnerPos, initialTileSize])();
+  }, [isSpawnerReady, externalInitialPosition, initialPositionSet, currentTileId]);
 
-  // ========================================
-  // 6. ИНИЦИАЛИЗАЦИЯ ПОД-ХУКОВ
-  // ========================================
-  
-  /**
-   * ПОРЯДОК ВАЖЕН!
-   * Каждый следующий хук зависит от предыдущих
-   */
-  
-  // --- 6.1 Анимации (самый базовый слой) ---
-  const {
-    position,                    // Animated.ValueXY для позиции
-    width,                       // Animated.Value для ширины
-    height,                      // Animated.Value для высоты
-    currentTileSize,             // Ref с актуальным размером
-    currentPositionRef,          // Ref с актуальной позицией
-    animateSize,                 // Функция анимации размера
-    animateToPosition,           // Функция анимации перемещения
-    getTileSize,                 // Функция получения размера под масштаб
-    correctPositionIfNeeded,     // Коррекция позиции перед перетаскиванием
-    updatePositionFromTargetCell, // Обновление по целевой ячейке
-  } = useTileAnimations({
-    tileId,
+  const initialTileSize = { width: spawnerSize, height: spawnerSize };
+
+  // Инициализация под-хуков
+  const animations = useTileAnimations({
+    tileId: currentTileId || 'temp',
     initialPosition: startPosition,
     initialSize: initialTileSize,
     scale,
@@ -122,118 +120,102 @@ const useDraggable = (initialPosition = null, tileId = null) => {
     isSpawnerReady,
   });
 
-  // --- 6.2 Логика спавнера ---
-  const {
-    spawnerTileSize,             // Размер плитки в спавнере
-    handlePositionChange,        // Обработчик изменения позиции
-    setInSpawner,                // Принудительный вход в спавнер
-    setOutOfSpawner,             // Принудительный выход из спавнера
-    checkIfInSpawner,            // Проверка нахождения в спавнере
-  } = useTileSpawnerLogic({
-    tileId,
+  const spawnerLogic = useTileSpawnerLogic({
+    getTileId: getCurrentTileIdRef,
     spawnerPos,
     isSpawnerReady,
-    currentTileSize,
-    currentPositionRef,
-    animateSize,
-    getTileSize,
+    currentTileSize: animations.currentTileSize,
+    currentPositionRef: animations.currentPositionRef,
+    animateSize: animations.animateSize,
+    getTileSize: animations.getTileSize,
     scale,
     isInSpawner,
     setIsInSpawner,
+    tileData: currentTileData,
   });
 
-  // --- 6.3 Логика целевой ячейки ---
-  const {
-    isCellFree,                  // Проверка свободы ячейки
-    tryOccupyCell,               // Попытка занять ячейку
-    releaseCurrentCell,          // Освобождение текущей ячейки
-    updateTargetCellFromPosition, // Обновление целевой ячейки по позиции
-  } = useTileTargetCell({
-    tileId,
+  const targetCellLogic = useTileTargetCell({
+    getTileId: getCurrentTileIdRef,
     scale,
     offset,
-    currentTileSize,
-    currentPositionRef,
+    currentTileSize: animations.currentTileSize,
+    currentPositionRef: animations.currentPositionRef,
     isInSpawner,
     setIsInSpawner,
     targetCellRef,
-    onCellOccupied: (col, row) => { 
-      console.log(`[Tile ${tileId}] Ячейка [${col},${row}] занята`);
-    },
+    tileData: currentTileData,
   });
 
-  // --- 6.4 Логика размещения (при отпускании) ---
-  const {
-    handlePlacement,             // Основная функция размещения
-  } = useTilePlacement({
-    tileId,
+  const handleTilePlaced = useCallback((placedTileData, targetCell) => {
+    if (!placedTileData?.id) {
+      console.log('[Tile] Нет данных плитки при размещении');
+      return;
+    }
+    
+    console.log(`[Tile ${placedTileData.id}] Плитка размещена в [${targetCell.col},${targetCell.row}]`);
+    
+    const newTile = createSpawnerTile();
+    console.log(`[Tile] Создана новая плитка в спавнере: ${newTile?.id}`);
+    
+    setCurrentTileData(newTile);
+    returnTileToSpawner(newTile);
+    targetCellRef.current = null;
+    setIsInSpawner(true);
+    
+  }, [createSpawnerTile, returnTileToSpawner, targetCellRef, setIsInSpawner]);
+
+  const placementLogic = useTilePlacement({
+    getTileId: getCurrentTileIdRef,
     spawnerPos,
-    currentTileSize,
-    currentPositionRef,
+    currentTileSize: animations.currentTileSize,
+    currentPositionRef: animations.currentPositionRef,
     isInSpawner,
     targetCellRef,
-    isCellFree,
-    tryOccupyCell,
-    releaseCurrentCell,
-    setInSpawner,
-    setOutOfSpawner,
-    animateToPosition,
-    // scale и offset не передаём - получаем напрямую в useTilePlacement
+    isCellFree: targetCellLogic.isCellFree,
+    tryOccupyCell: targetCellLogic.tryOccupyCell,
+    releaseCurrentCell: targetCellLogic.releaseCurrentCell,
+    setInSpawner: spawnerLogic.setInSpawner,
+    setOutOfSpawner: spawnerLogic.setOutOfSpawner,
+    animateToPosition: animations.animateToPosition,
+    onTilePlaced: handleTilePlaced,
+    tileData: currentTileData,
   });
 
-  // --- 6.5 Обработчик жестов ---
-  const {
-    panHandlers,                 // Обработчики для Animated.View
-  } = useTileDragHandler({
-    tileId,
-    position,
-    currentTileSize,
-    currentPositionRef,
-    correctPositionIfNeeded,
-    onPlacement: handlePlacement,
-    animateToPosition,
+  const dragHandler = useTileDragHandler({
+    getTileId: getCurrentTileIdRef,
+    position: animations.position,
+    currentTileSize: animations.currentTileSize,
+    currentPositionRef: animations.currentPositionRef,
+    correctPositionIfNeeded: animations.correctPositionIfNeeded,
+    onPlacement: placementLogic.handlePlacement,
+    animateToPosition: animations.animateToPosition,
   });
 
-  // ========================================
-  // 7. ПОДКЛЮЧЕНИЕ СЛУШАТЕЛЯ ПОЗИЦИИ
-  // ========================================
-  
-  /**
-   * Каждое изменение позиции передаётся в handlePositionChange,
-   * который проверяет вход/выход из спавнера
-   */
+  // Подключение слушателя позиции
   useEffect(() => {
-    const listener = position.addListener((value) => {
-      handlePositionChange(value);
+    if (!animations.position) return;
+    
+    const listener = animations.position.addListener((value) => {
+      spawnerLogic.handlePositionChange(value);
     });
     
-    return () => position.removeListener(listener);
-  }, [position, handlePositionChange]);
+    return () => animations.position.removeListener(listener);
+  }, [animations.position, spawnerLogic]);
 
-  // ========================================
-  // 8. СИНХРОНИЗАЦИЯ ЦЕЛЕВОЙ ЯЧЕЙКИ
-  // ========================================
-  
-  /**
-   * При первом выходе из спавнера (нет целевой ячейки)
-   * определяем ячейку по текущей позиции
-   */
+  // Синхронизация целевой ячейки
   useEffect(() => {
-    if (!isInSpawner && !targetCellRef.current) {
-      updateTargetCellFromPosition();
+    if (!isSpawnerReady) return;
+    if (!isInSpawner && !targetCellRef.current && currentTileData && isValid) {
+      targetCellLogic.updateTargetCellFromPosition();
     }
-  }, [isInSpawner, targetCellRef, updateTargetCellFromPosition]);
+  }, [isInSpawner, targetCellRef, targetCellLogic, currentTileData, isSpawnerReady, isValid]);
 
-  // ========================================
-  // 9. ВОЗВРАЩАЕМЫЙ API
-  // ========================================
-  
   return {
-    position,        // Animated.ValueXY для позиции
-    width,           // Animated.Value для ширины
-    height,          // Animated.Value для высоты
-    panHandlers,     // Обработчики жестов для Animated.View
-    isInSpawner,     // Флаг для отладки
+    position: animations.position || { x: 0, y: 0 },
+    width: animations.width || spawnerSize,
+    height: animations.height || spawnerSize,
+    panHandlers: dragHandler.panHandlers || {},
+    isInSpawner,
   };
 };
 

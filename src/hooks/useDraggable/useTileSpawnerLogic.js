@@ -1,18 +1,20 @@
 // ========================================
-// ХУК ЛОГИКИ СПАВНЕРА
+// ХУК ЛОГИКИ СПАВНЕРА (v2 - Бесконечный спавнер)
 // Отвечает за:
 // - Отслеживание входа/выхода из спавнера при движении
 // - Управление размером плитки (в спавнере / вне спавнера)
 // - Реакцию на изменение масштаба для плиток вне спавнера
 // - Принудительную установку состояния спавнера
+// - Взаимодействие с TilesContext для генерации новых плиток
 // ========================================
 
 import { useCallback, useEffect, useRef } from 'react';
 import { isCenterOverSpawner } from '../../utils/spawnerUtils';
 import { getSpawnerSize } from '../../constants/spawner';
+import { useTiles } from '../../context/TilesContext';
 
 export const useTileSpawnerLogic = ({
-  tileId,                    // ID плитки для отладки
+  getTileId,                  // Функция для получения актуального ID плитки
   spawnerPos,                 // Позиция спавнера {x, y, size}
   isSpawnerReady,             // Флаг готовности спавнера
   currentTileSize,            // Ref с текущим размером плитки
@@ -23,6 +25,7 @@ export const useTileSpawnerLogic = ({
   isInSpawner,                // Текущее состояние (из useDraggable)
   setIsInSpawner,             // Функция изменения состояния
   onSpawnerStateChange,       // Колбэк при изменении состояния (опционально)
+  tileData,                   // Данные текущей плитки (для возврата в спавнер)
 }) => {
   
   // ========================================
@@ -36,10 +39,30 @@ export const useTileSpawnerLogic = ({
   const prevIsInSpawnerRef = useRef(isInSpawner);
   
   /**
+   * Флаг, что плитка была взята из спавнера и ещё не размещена
+   * Используется для предотвращения множественного создания плиток
+   */
+  const wasTakenFromSpawnerRef = useRef(false);
+  
+  /**
    * Размер плитки в спавнере (фиксированный, из конфига)
    */
   const spawnerSize = getSpawnerSize();
   const spawnerTileSize = { width: spawnerSize, height: spawnerSize };
+  
+  // Получаем функции из TilesContext
+  const { 
+    takeTileFromSpawner, 
+    returnTileToSpawner,
+    hasTileInSpawner,
+    getSpawnerTile 
+  } = useTiles();
+
+  // Вспомогательная функция для получения ID для логов
+  const getLogId = useCallback(() => {
+    const id = getTileId();
+    return id || 'unknown';
+  }, [getTileId]);
 
   // ========================================
   // 2. ФУНКЦИИ ПРОВЕРКИ
@@ -73,17 +96,23 @@ export const useTileSpawnerLogic = ({
     if (!isSpawnerReady) return;
     
     const inSpawner = checkIfInSpawner(newPosition);
+    const logId = getLogId();
     
     // Если состояние изменилось - обновляем
     if (inSpawner !== isInSpawner) {
-      console.log(`[Tile ${tileId}] ${inSpawner ? 'Вход' : 'Выход'} из спавнера`);
+      console.log(`[Tile ${logId}] ${inSpawner ? 'Вход' : 'Выход'} из спавнера`);
       setIsInSpawner(inSpawner);
       
       if (onSpawnerStateChange) {
         onSpawnerStateChange(inSpawner);
       }
+      
+      // Важно: при входе в спавнер помечаем, что плитка взята из него
+      if (inSpawner) {
+        wasTakenFromSpawnerRef.current = true;
+      }
     }
-  }, [isSpawnerReady, checkIfInSpawner, isInSpawner, setIsInSpawner, tileId, onSpawnerStateChange]);
+  }, [isSpawnerReady, checkIfInSpawner, isInSpawner, setIsInSpawner, onSpawnerStateChange, getLogId]);
 
   // ========================================
   // 4. УПРАВЛЕНИЕ РАЗМЕРОМ
@@ -114,14 +143,15 @@ export const useTileSpawnerLogic = ({
    */
   useEffect(() => {
     if (prevIsInSpawnerRef.current !== isInSpawner) {
-      console.log(`[Tile ${tileId}] isInSpawner изменился:`, isInSpawner);
+      const logId = getLogId();
+      console.log(`[Tile ${logId}] isInSpawner изменился:`, isInSpawner);
       
       // Плавно меняем размер при смене состояния
       updateSizeForSpawner(isInSpawner, false);
       
       prevIsInSpawnerRef.current = isInSpawner;
     }
-  }, [isInSpawner, updateSizeForSpawner, tileId]);
+  }, [isInSpawner, updateSizeForSpawner, getLogId]);
 
   /**
    * Обновление размера при изменении масштаба
@@ -143,15 +173,23 @@ export const useTileSpawnerLogic = ({
    */
   const setInSpawner = useCallback(() => {
     if (!isInSpawner) {
-      console.log(`[Tile ${tileId}] Принудительный вход в спавнер`);
+      const logId = getLogId();
+      console.log(`[Tile ${logId}] Принудительный вход в спавнер`);
       setIsInSpawner(true);
       
       if (onSpawnerStateChange) {
         onSpawnerStateChange(true);
       }
+      
+      // Возвращаем плитку в спавнер в контексте
+      if (tileData) {
+        returnTileToSpawner(tileData);
+      }
+      
+      wasTakenFromSpawnerRef.current = true;
       // Размер обновится в useEffect при изменении isInSpawner
     }
-  }, [isInSpawner, setIsInSpawner, tileId, onSpawnerStateChange]);
+  }, [isInSpawner, setIsInSpawner, onSpawnerStateChange, tileData, returnTileToSpawner, getLogId]);
 
   /**
    * Принудительный выход из спавнера
@@ -159,25 +197,63 @@ export const useTileSpawnerLogic = ({
    */
   const setOutOfSpawner = useCallback(() => {
     if (isInSpawner) {
-      console.log(`[Tile ${tileId}] Принудительный выход из спавнера`);
+      const logId = getLogId();
+      console.log(`[Tile ${logId}] Принудительный выход из спавнера`);
       setIsInSpawner(false);
       
       if (onSpawnerStateChange) {
         onSpawnerStateChange(false);
       }
+      
+      // Помечаем, что плитка была взята из спавнера
+      wasTakenFromSpawnerRef.current = true;
       // Размер обновится в useEffect при изменении isInSpawner
     }
-  }, [isInSpawner, setIsInSpawner, tileId, onSpawnerStateChange]);
+  }, [isInSpawner, setIsInSpawner, onSpawnerStateChange, getLogId]);
+
+  /**
+   * Проверяет, нужно ли создать новую плитку в спавнере
+   * Вызывается после успешного размещения плитки в сетке
+   */
+  const ensureSpawnerHasTile = useCallback(() => {
+    // Если спавнер пуст - создаём новую плитку
+    if (!hasTileInSpawner()) {
+      const logId = getLogId();
+      console.log(`[Tile ${logId}] Спавнер пуст, создаём новую плитку`);
+      // Сигнал для App.js, что нужно создать новую плитку
+      return true;
+    }
+    return false;
+  }, [hasTileInSpawner, getLogId]);
+
+  /**
+   * Получает текущую плитку из спавнера для перетаскивания
+   */
+  const acquireTileFromSpawner = useCallback(() => {
+    if (!wasTakenFromSpawnerRef.current && hasTileInSpawner()) {
+      const tile = takeTileFromSpawner();
+      if (tile) {
+        const logId = getLogId();
+        console.log(`[Tile ${logId}] Получена плитка ${tile.id} из спавнера`);
+        wasTakenFromSpawnerRef.current = true;
+        return tile;
+      }
+    }
+    return null;
+  }, [takeTileFromSpawner, hasTileInSpawner, getLogId]);
 
   // ========================================
   // 7. ВОЗВРАЩАЕМЫЙ API
   // ========================================
   
   return {
-    spawnerTileSize,       // Размер плитки в спавнере
-    handlePositionChange,  // Для подключения к слушателю позиции
-    setInSpawner,          // Принудительный вход
-    setOutOfSpawner,       // Принудительный выход
-    checkIfInSpawner,      // Проверка нахождения в спавнере
+    spawnerTileSize,           // Размер плитки в спавнере
+    handlePositionChange,      // Для подключения к слушателю позиции
+    setInSpawner,              // Принудительный вход
+    setOutOfSpawner,           // Принудительный выход
+    checkIfInSpawner,          // Проверка нахождения в спавнере
+    ensureSpawnerHasTile,      // Проверка необходимости новой плитки
+    acquireTileFromSpawner,    // Получение плитки из спавнера
+    wasTakenFromSpawner: wasTakenFromSpawnerRef.current, // Флаг взятия плитки
   };
 };
