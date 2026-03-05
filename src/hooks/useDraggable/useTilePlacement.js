@@ -2,7 +2,7 @@ import { useCallback, useRef } from 'react';
 import { useZoom } from '../useZoom';
 import { useGrid } from '../../context/GridContext';
 import { findNearestCell, getSnapToCellPosition } from '../../utils/gridUtils';
-import { getSnapToSpawnerPosition, isInGravityZone } from '../../utils/spawnerUtils';
+import { SpawnerService } from '../../services/SpawnerService';
 
 export const useTilePlacement = ({
   getTileId,
@@ -20,15 +20,12 @@ export const useTilePlacement = ({
   animateToPosition,
   onTilePlaced,
 }) => {
-  
   const { scale } = useZoom();
   const { offset } = useGrid();
-  
   const wasPlacedRef = useRef(false);
-  
   const scaleRef = useRef(scale);
   const offsetRef = useRef(offset);
-  
+
   scaleRef.current = scale;
   offsetRef.current = offset;
 
@@ -43,7 +40,7 @@ export const useTilePlacement = ({
   }, [getTileId]);
 
   const checkGravityZone = useCallback((position) => {
-    return isInGravityZone(
+    return SpawnerService.isInGravityZone(
       position,
       currentTileSize.current,
       spawnerPos
@@ -53,20 +50,20 @@ export const useTilePlacement = ({
   const snapToSpawner = useCallback(() => {
     const logId = getLogId();
     console.log(`[Tile ${logId}] ПРИТЯГИВАЕМ К СПАВНЕРУ`);
-    
+
     if (!isInSpawner && targetCellRef.current) {
       releaseCurrentCell();
     }
-    
-    const spawnerPosition = getSnapToSpawnerPosition(
+
+    const spawnerPosition = SpawnerService.getSnapToSpawnerPosition(
       currentTileSize.current, 
       spawnerPos
     );
-    
+
     setInSpawner(true);
     targetCellRef.current = null;
     wasPlacedRef.current = false;
-    
+
     return spawnerPosition;
   }, [isInSpawner, targetCellRef, releaseCurrentCell, currentTileSize, spawnerPos, setInSpawner, getLogId]);
 
@@ -78,18 +75,18 @@ export const useTilePlacement = ({
       console.log(`[Tile ${logId}] Нет ID плитки, не можем разместить`);
       return null;
     }
-    
+
     console.log(`[Tile ${actualId}] Притягиваем к сетке`);
-    
+
     const currentPos = currentPositionRef.current;
     const tileSize = currentTileSize.current;
-    
+
     const centerX = currentPos.x + tileSize.width / 2;
     const centerY = currentPos.y + tileSize.height / 2;
-    
+
     const currentScale = scaleRef.current;
     const currentOffset = offsetRef.current;
-    
+
     const targetCell = findNearestCell(
       centerX, 
       centerY, 
@@ -97,9 +94,9 @@ export const useTilePlacement = ({
       currentOffset.x,
       currentOffset.y
     );
-    
+
     console.log(`[Tile ${actualId}] Целевая ячейка: [${targetCell.col},${targetCell.row}]`);
-    
+
     if (isCellFree(targetCell.col, targetCell.row)) {
       const snappedPosition = getSnapToCellPosition(
         tileSize,
@@ -127,7 +124,7 @@ export const useTilePlacement = ({
         return snappedPosition;
       }
     }
-    
+
     console.log(`[Tile ${actualId}] Ячейка занята или ошибка, возврат`);
     return null;
   }, [currentPositionRef, currentTileSize, isCellFree, tryOccupyCell, setOutOfSpawner, onTilePlaced, getTileData, getActualId, getLogId]);
@@ -150,27 +147,26 @@ export const useTilePlacement = ({
         currentOffset.y
       );
     } 
-    
-    return getSnapToSpawnerPosition(currentTileSize.current, spawnerPos);
+
+    return SpawnerService.getSnapToSpawnerPosition(currentTileSize.current, spawnerPos);
   }, [isInSpawner, targetCellRef, currentTileSize, spawnerPos, getLogId]);
 
   const handlePlacement = useCallback(() => {
     const currentPos = currentPositionRef.current;
     const inGravityZone = checkGravityZone(currentPos);
-    
     const actualId = getTileId ? getTileId() : null;
     const logId = actualId || 'unknown';
-    
+
     console.log(`[Tile ${logId}] В зоне притяжения:`, inGravityZone);
     console.log(`[Tile ${logId}] Реальный ID:`, actualId);
-    
+
     if (inGravityZone) {
       wasPlacedRef.current = false;
       return snapToSpawner();
     }
-    
+
     const gridPosition = snapToGridAndPlace();
-    
+
     if (gridPosition) {
       return gridPosition;
     } else {

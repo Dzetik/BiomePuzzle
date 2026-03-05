@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef } from 'react';
-import { isCenterOverSpawner } from '../../utils/spawnerUtils';
+import { SpawnerService } from '../../services/SpawnerService';
 import { getSpawnerSize } from '../../constants/spawner';
 import { useTiles } from '../../context/TilesContext';
 
@@ -17,24 +17,21 @@ export const useTileSpawnerLogic = ({
   onSpawnerStateChange,
   tileData,
 }) => {
-  
   const prevIsInSpawnerRef = useRef(isInSpawner);
   const wasTakenFromSpawnerRef = useRef(false);
-  
   const isFreshSpawnerTileRef = useRef(false);
-  
   const spawnerSize = getSpawnerSize();
   const spawnerTileSize = { width: spawnerSize, height: spawnerSize };
   
-  const { 
-    takeTileFromSpawner, 
+  const {
+    takeTileFromSpawner,
     returnTileToSpawner,
     getSpawnerTile,
   } = useTiles();
 
   const getSpawnerTileRef = useRef(getSpawnerTile);
   const takeTileFromSpawnerRef = useRef(takeTileFromSpawner);
-  
+
   useEffect(() => {
     getSpawnerTileRef.current = getSpawnerTile;
     takeTileFromSpawnerRef.current = takeTileFromSpawner;
@@ -45,26 +42,18 @@ export const useTileSpawnerLogic = ({
     return id || 'unknown';
   }, [getTileId]);
 
-  // ========================================
-  // СБРОС ФЛАГОВ ПРИ СМЕНЕ ПЛИТКИ
-  // ========================================
-
   useEffect(() => {
     if (tileData?.id) {
       console.log(`[SpawnerLogic] Новая плитка ${tileData.id}, сброс флагов`);
       wasTakenFromSpawnerRef.current = false;
       isFreshSpawnerTileRef.current = true;
-      
+
       setTimeout(() => {
         isFreshSpawnerTileRef.current = false;
         console.log(`[SpawnerLogic] Сброс флага isFreshSpawnerTileRef для ${tileData.id}`);
       }, 500);
     }
   }, [tileData?.id]);
-
-  // ========================================
-  // ПРОВЕРКИ
-  // ========================================
 
   const checkIfInSpawner = useCallback((position) => {
     if (!isSpawnerReady || !spawnerPos) return false;
@@ -73,32 +62,27 @@ export const useTileSpawnerLogic = ({
       width: spawnerSize, 
       height: spawnerSize 
     };
-    
-    return isCenterOverSpawner(
+
+    return SpawnerService.isCenterOverSpawner(
       position,
       spawnerCheckSize,
       spawnerPos
     );
   }, [isSpawnerReady, spawnerPos, spawnerSize]);
 
-  // ========================================
-  // ОБРАБОТЧИК ИЗМЕНЕНИЯ ПОЗИЦИИ
-  // ========================================
-
   const handlePositionChange = useCallback((newPosition) => {
     if (!isSpawnerReady) return;
-    
     if (isFreshSpawnerTileRef.current) {
       return;
     }
-    
+
     const inSpawner = checkIfInSpawner(newPosition);
     const logId = getLogId();
-    
+
     if (inSpawner && isInSpawner) {
       return;
     }
-    
+
     if (inSpawner !== isInSpawner) {
       console.log(`[Tile ${logId}] ${inSpawner ? 'Вход' : 'Выход'} из спавнера`);
       setIsInSpawner(inSpawner);
@@ -113,10 +97,6 @@ export const useTileSpawnerLogic = ({
     }
   }, [isSpawnerReady, checkIfInSpawner, isInSpawner, setIsInSpawner, onSpawnerStateChange, getLogId]);
 
-  // ========================================
-  // УПРАВЛЕНИЕ РАЗМЕРОМ
-  // ========================================
-
   const updateSizeForSpawner = useCallback((inSpawner, immediate = false) => {
     if (inSpawner) {
       animateSize(spawnerTileSize, immediate);
@@ -130,27 +110,19 @@ export const useTileSpawnerLogic = ({
     if (prevIsInSpawnerRef.current !== isInSpawner) {
       const logId = getLogId();
       console.log(`[Tile ${logId}] isInSpawner изменился:`, isInSpawner);
-      
       updateSizeForSpawner(isInSpawner, false);
-      
       prevIsInSpawnerRef.current = isInSpawner;
     }
   }, [isInSpawner, updateSizeForSpawner, getLogId]);
 
   useEffect(() => {
-    // ✅ Пропускаем если плитка только что создана (ещё не устоялась)
     if (isFreshSpawnerTileRef.current) {
       return;
     }
-    
     if (!isInSpawner && isSpawnerReady) {
       updateSizeForSpawner(false, false);
     }
   }, [scale, isInSpawner, isSpawnerReady, updateSizeForSpawner, isFreshSpawnerTileRef]);
-
-  // ========================================
-  // ПРИНУДИТЕЛЬНОЕ УПРАВЛЕНИЕ СОСТОЯНИЕМ
-  // ========================================
 
   const setInSpawner = useCallback(() => {
     if (!isInSpawner) {
@@ -184,16 +156,11 @@ export const useTileSpawnerLogic = ({
     }
   }, [isInSpawner, setIsInSpawner, onSpawnerStateChange, getLogId]);
 
-  // ========================================
-  // ВЗЯТИЕ ПЛИТКИ ИЗ СПАВНЕРА
-  // ========================================
-
   const acquireTileFromSpawner = useCallback(() => {
     const logId = getLogId();
-    
     const currentSpawnerTile = getSpawnerTileRef.current();
     console.log(`[Tile ${logId}] spawnerTile через ref:`, currentSpawnerTile?.id || 'null');
-    
+
     if (!wasTakenFromSpawnerRef.current && currentSpawnerTile) {
       const tile = takeTileFromSpawnerRef.current();
       if (tile) {
@@ -205,10 +172,6 @@ export const useTileSpawnerLogic = ({
     return null;
   }, [getLogId]);
 
-  // ========================================
-  // ВОЗВРАЩАЕМЫЙ API
-  // ========================================
-  
   return {
     spawnerTileSize,
     handlePositionChange,

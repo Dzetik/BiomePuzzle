@@ -1,4 +1,7 @@
-import React, { useEffect, useState, useCallback } from 'react';
+// ========================================
+// ГЛАВНЫЙ ФАЙЛ ПРИЛОЖЕНИЯ - ИСПРАВЛЕННЫЙ
+// ========================================
+import React, { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { View, StyleSheet, StatusBar } from 'react-native';
 import { GestureHandlerRootView, GestureDetector, Gesture } from 'react-native-gesture-handler';
 
@@ -20,7 +23,7 @@ import { GridProvider } from './src/context/GridContext';
 // Утилиты и константы
 import { getSpawnerSize } from './src/constants/spawner';
 import { DEFAULT_TILE_SIZE } from './src/constants/tile';
-import { getSnapToSpawnerPosition } from './src/utils/spawnerUtils';
+import { SpawnerService } from './src/services/SpawnerService';
 import { getSnapToCellPosition } from './src/utils/gridUtils';
 
 const testTexture = require('./assets/images/textures/test1.png');
@@ -30,13 +33,12 @@ const testTexture = require('./assets/images/textures/test1.png');
 // ========================================
 const ZoomHandler = ({ children }) => {
   const { scale, setScale, MIN_SCALE, MAX_SCALE } = useZoom();
-  
-  const pinchGesture = Gesture.Pinch()
-    .onUpdate((event) => {
-      const newScale = scale * event.scale;
-      const clampedScale = Math.min(MAX_SCALE, Math.max(MIN_SCALE, newScale));
-      setScale(clampedScale);
-    });
+
+  const pinchGesture = Gesture.Pinch().onUpdate((event) => {
+    const newScale = scale * event.scale;
+    const clampedScale = Math.min(MAX_SCALE, Math.max(MIN_SCALE, newScale));
+    setScale(clampedScale);
+  });
 
   return (
     <GestureDetector gesture={pinchGesture}>
@@ -55,22 +57,21 @@ const PlacedTiles = () => {
   const { scale } = useZoom();
   const { offset } = useGrid();
   const [tiles, setTiles] = useState([]);
-  
+
   useEffect(() => {
     const placedTiles = getAllTiles();
     setTiles(placedTiles);
-    console.log('[App] Размещённые плитки:', placedTiles.map(t => `${t.id}@[${t.col},${t.row}]`));
   }, [getAllTiles]);
-  
+
   return (
     <>
       {tiles.map((tile) => {
         const cellSize = DEFAULT_TILE_SIZE.width;
-        const tileSize = { 
-          width: cellSize * scale, 
-          height: cellSize * scale 
+        const tileSize = {
+          width: cellSize * scale,
+          height: cellSize * scale
         };
-        
+
         const position = getSnapToCellPosition(
           tileSize,
           tile.col,
@@ -104,34 +105,53 @@ const GameContent = () => {
   const spawnerPos = useSpawner();
   const [isInitialized, setIsInitialized] = useState(false);
   
+  // ✅ REFS ДЛЯ ОТСЛЕЖИВАНИЯ АКТИВНОЙ ПЛИТКИ
+  const activeTileIdRef = useRef(null);
+  const hasActiveTileRef = useRef(false);
+
+  // Инициализация спавнера
   useEffect(() => {
     if (spawnerPos?.size > 0 && !isInitialized) {
       console.log('[App] Инициализация спавнера');
-      createSpawnerTile();
+      const tile = createSpawnerTile();
+      if (tile?.id) {
+        activeTileIdRef.current = tile.id;
+        hasActiveTileRef.current = true;
+      }
       setIsInitialized(true);
     }
   }, [spawnerPos, createSpawnerTile, isInitialized]);
-  
+
   const spawnerTile = getSpawnerTile();
-  console.log('[App] Текущая плитка в спавнере:', spawnerTile?.id);
   
+  // ✅ Обновляем ref при изменении spawnerTile
+  useEffect(() => {
+    if (spawnerTile?.id) {
+      activeTileIdRef.current = spawnerTile.id;
+      hasActiveTileRef.current = true;
+      console.log('[App] Обновлён activeTileId:', spawnerTile.id);
+    }
+  }, [spawnerTile?.id]);
+
   const getInitialPosition = useCallback(() => {
     if (spawnerPos?.size > 0) {
       const spawnerSize = getSpawnerSize();
       const initialTileSize = { width: spawnerSize, height: spawnerSize };
-      return getSnapToSpawnerPosition(initialTileSize, spawnerPos);
+      return SpawnerService.getSnapToSpawnerPosition(initialTileSize, spawnerPos);
     }
     return { x: 0, y: 0 };
   }, [spawnerPos]);
-  
-  const initialPosition = getInitialPosition();
-  
+
+  const initialPosition = useMemo(() => getInitialPosition(), [getInitialPosition]);
+
+  // ✅ Всегда вызываем useDraggable с актуальным ID из ref
   const draggableTile = useDraggable(
-    spawnerTile, 
-    spawnerTile?.id,
+    spawnerTile,
+    activeTileIdRef.current,  // ✅ Используем ref, не spawnerTile?.id
     initialPosition
   );
 
+  // Подписка на позицию
   useEffect(() => {
     if (draggableTile?.position && typeof draggableTile.position.addListener === 'function') {
       const listener = draggableTile.position.addListener((value) => {
@@ -141,20 +161,23 @@ const GameContent = () => {
     }
   }, [draggableTile?.position]);
 
+  // ✅ УСЛОВИЕ РЕНДЕРА: проверяем hasActiveTileRef, а не spawnerTile
+  const shouldRenderActiveTile = hasActiveTileRef.current && draggableTile?.position;
+
   return (
     <View style={styles.gameContainer}>
       <GridView />
       <SpawnerCellView />
       <PlacedTiles />
       
-      {draggableTile?.position && (
+      {shouldRenderActiveTile && (
         <TileView 
           textureSource={testTexture}
           position={draggableTile.position}
           width={draggableTile.width}
           height={draggableTile.height}
           panHandlers={draggableTile.panHandlers}
-          tileId={spawnerTile?.id}
+          tileId={activeTileIdRef.current || 'temp'}  // ✅ Используем ref
         />
       )}
     </View>
@@ -167,10 +190,10 @@ const GameContent = () => {
 const App = () => {
   return (
     <GestureHandlerRootView style={styles.container}>
+      <StatusBar hidden={true} />
       <ZoomProvider>
         <GridProvider>
           <TilesProvider>
-            <StatusBar hidden={true} />
             <ZoomHandler>
               <GameContent />
             </ZoomHandler>
