@@ -1,4 +1,6 @@
-import React, { createContext, useContext, useState, useCallback } from 'react';
+// src/context/TilesContext.js
+
+import React, { createContext, useContext, useState, useCallback, useMemo } from 'react';
 
 const TILE_ID_PREFIX = 'tile';
 let tileCounter = 1;
@@ -11,11 +13,16 @@ export const TilesProvider = ({ children }) => {
   const [placedTiles, setPlacedTiles] = useState(new Map());
   const [spawnerTile, setSpawnerTile] = useState(null);
 
+  // ============================================================================
+  // ФУНКЦИИ ДЛЯ РАЗМЕЩЁННЫХ ПЛИТОК
+  // ============================================================================
+
   const addTile = useCallback((col, row, tileData) => {
     const key = `${col},${row}`;
     setPlacedTiles(prev => {
       const newMap = new Map(prev);
       
+      // Удаляем старую запись этой плитки если есть
       const existingEntry = Array.from(newMap.entries()).find(
         ([_, value]) => value.id === tileData.id
       );
@@ -23,11 +30,15 @@ export const TilesProvider = ({ children }) => {
       if (existingEntry) {
         const [existingKey] = existingEntry;
         newMap.delete(existingKey);
-        console.log(`[Tiles] Удалена старая запись ${existingKey} для плитки ${tileData.id}`);
+        if (process.env.NODE_ENV !== 'production') {
+          console.log(`[Tiles] Удалена старая запись ${existingKey} для плитки ${tileData.id}`);
+        }
       }
       
       newMap.set(key, { ...tileData, col, row });
-      console.log(`[Tiles] Добавлена плитка ${tileData.id} в [${col},${row}]`);
+      if (process.env.NODE_ENV !== 'production') {
+        console.log(`[Tiles] Добавлена плитка ${tileData.id} в [${col},${row}]`);
+      }
       return newMap;
     });
   }, []);
@@ -49,64 +60,25 @@ export const TilesProvider = ({ children }) => {
       const newMap = new Map(prev);
       newMap.delete(fromKey);
       
+      // Удаляем дубликаты этой плитки
       const otherEntries = Array.from(newMap.entries()).filter(
         ([_, value]) => value.id === tileData.id
       );
       otherEntries.forEach(([key]) => {
         newMap.delete(key);
-        console.log(`[Tiles] Удалена дублирующаяся запись ${key}`);
+        if (process.env.NODE_ENV !== 'production') {
+          console.log(`[Tiles] Удалена дублирующаяся запись ${key}`);
+        }
       });
       
       newMap.set(toKey, { ...tileData, col: toCol, row: toRow });
       
-      console.log(`[Tiles] Перемещена плитка ${tileData.id} из [${fromCol},${fromRow}] в [${toCol},${toRow}]`);
+      if (process.env.NODE_ENV !== 'production') {
+        console.log(`[Tiles] Перемещена плитка ${tileData.id} из [${fromCol},${fromRow}] в [${toCol},${toRow}]`);
+      }
       return newMap;
     });
   }, []);
-
-  const createSpawnerTile = useCallback((tileData = null) => {
-    const newTile = tileData || {
-      id: generateTileId(),
-      texture: 'test1.png',
-    };
-    
-    console.log(`[Tiles] Создана новая плитка в спавнере: ${newTile.id}`);
-    setSpawnerTile(newTile);
-    return newTile;
-  }, []);
-
-  const removeSpawnerTile = useCallback(() => {
-    console.log('[Tiles] Плитка удалена из спавнера');
-    setSpawnerTile(null);
-  }, []);
-
-  const takeTileFromSpawner = useCallback(() => {
-    if (!spawnerTile) {
-      console.log('[Tiles] Попытка взять плитку из пустого спавнера');
-      return null;
-    }
-    
-    const tile = spawnerTile;
-    console.log(`[Tiles] Плитка ${tile.id} взята из спавнера`);
-    
-    // ✅ Очищаем спавнер при взятии
-    setSpawnerTile(null);
-    
-    return tile;
-  }, [spawnerTile]);
-
-  const returnTileToSpawner = useCallback((tileData) => {
-    console.log(`[Tiles] Плитка ${tileData.id} возвращена в спавнер`);
-    setSpawnerTile(tileData);
-  }, []);
-
-  const hasTileInSpawner = useCallback(() => {
-    return spawnerTile !== null;
-  }, [spawnerTile]);
-
-  const getSpawnerTile = useCallback(() => {
-    return spawnerTile;
-  }, [spawnerTile]);
 
   const isCellOccupied = useCallback((col, row) => {
     const key = `${col},${row}`;
@@ -119,12 +91,10 @@ export const TilesProvider = ({ children }) => {
   }, [placedTiles]);
 
   const getAllTiles = useCallback(() => {
-    const tiles = Array.from(placedTiles.entries()).map(([key, value]) => {
+    return Array.from(placedTiles.entries()).map(([key, value]) => {
       const [col, row] = key.split(',').map(Number);
       return { ...value, col, row };
     });
-    console.log('[Tiles] getAllTiles:', tiles.map(t => `${t.id}@[${t.col},${t.row}]`));
-    return tiles;
   }, [placedTiles]);
 
   const getOccupiedBounds = useCallback(() => {
@@ -144,7 +114,68 @@ export const TilesProvider = ({ children }) => {
     return { minCol, maxCol, minRow, maxRow };
   }, [placedTiles]);
 
-  const value = {
+  // ============================================================================
+  // ФУНКЦИИ ДЛЯ СПАВНЕРА
+  // ============================================================================
+
+  const createSpawnerTile = useCallback((tileData = null) => {
+    const newTile = tileData || {
+      id: generateTileId(),
+      texture: 'test1.png',
+    };
+    
+    if (process.env.NODE_ENV !== 'production') {
+      console.log(`[Tiles] Создана новая плитка в спавнере: ${newTile.id}`);
+    }
+    setSpawnerTile(newTile);
+    return newTile;
+  }, []);
+
+  const removeSpawnerTile = useCallback(() => {
+    if (process.env.NODE_ENV !== 'production') {
+      console.log('[Tiles] Плитка удалена из спавнера');
+    }
+    setSpawnerTile(null);
+  }, []);
+
+  const takeTileFromSpawner = useCallback(() => {
+    if (!spawnerTile) {
+      if (process.env.NODE_ENV !== 'production') {
+        console.log('[Tiles] Попытка взять плитку из пустого спавнера');
+      }
+      return null;
+    }
+    
+    const tile = spawnerTile;
+    if (process.env.NODE_ENV !== 'production') {
+      console.log(`[Tiles] Плитка ${tile.id} взята из спавнера`);
+    }
+    
+    setSpawnerTile(null);
+    return tile;
+  }, [spawnerTile]);
+
+  const returnTileToSpawner = useCallback((tileData) => {
+    if (process.env.NODE_ENV !== 'production') {
+      console.log(`[Tiles] Плитка ${tileData.id} возвращена в спавнер`);
+    }
+    setSpawnerTile(tileData);
+  }, []);
+
+  const hasTileInSpawner = useCallback(() => {
+    return spawnerTile !== null;
+  }, [spawnerTile]);
+
+  const getSpawnerTile = useCallback(() => {
+    return spawnerTile;
+  }, [spawnerTile]);
+
+  // ============================================================================
+  // ЗНАЧЕНИЕ КОНТЕКСТА (с useMemo для оптимизации)
+  // ============================================================================
+
+  const value = useMemo(() => ({
+    // Размещённые плитки
     placedTiles,
     addTile,
     removeTile,
@@ -153,6 +184,8 @@ export const TilesProvider = ({ children }) => {
     getTileAt,
     getAllTiles,
     getOccupiedBounds,
+    
+    // Спавнер
     spawnerTile,
     createSpawnerTile,
     removeSpawnerTile,
@@ -160,7 +193,15 @@ export const TilesProvider = ({ children }) => {
     returnTileToSpawner,
     hasTileInSpawner,
     getSpawnerTile,
-  };
+  }), [
+    placedTiles,
+    addTile, removeTile, moveTile,
+    isCellOccupied, getTileAt, getAllTiles, getOccupiedBounds,
+    spawnerTile,
+    createSpawnerTile, removeSpawnerTile,
+    takeTileFromSpawner, returnTileToSpawner,
+    hasTileInSpawner, getSpawnerTile,
+  ]);
 
   return (
     <TilesContext.Provider value={value}>
@@ -176,3 +217,5 @@ export const useTiles = () => {
   }
   return context;
 };
+
+export default TilesContext;

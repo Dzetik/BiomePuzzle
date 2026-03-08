@@ -38,7 +38,7 @@ export type TileEvent =
   | { type: 'DRAG_END'; payload: { x: number; y: number } }
   
   // Ячейка найдена под плиткой
-  | { type: 'CELL_FOUND'; payload: { col: number; row: number; isFree: boolean } }
+  | { type: 'CELL_FOUND'; payload: { col: number; row: number; isFree: boolean; scale?: number; baseTileSize?: number; } }
   
   // Ячейка не найдена (плитка за пределами сетки)
   | { type: 'NO_CELL' }
@@ -110,6 +110,9 @@ export type MachineAction =
         y: number; 
         duration?: number;
         onComplete?: () => void;
+        col?: number;  
+        row?: number;
+        baseTileSize?: number;
       } 
     }
   // Анимировать размер

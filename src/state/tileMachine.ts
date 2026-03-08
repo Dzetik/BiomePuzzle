@@ -11,6 +11,7 @@ import {
   MachineAction,
 } from './tileMachine.types';
 import { DEFAULT_TILE_CONFIG, FEATURE_FLAGS } from './tileMachine.config';
+import { DEFAULT_TILE_SIZE } from '../constants/tile';
 
 // ============================================================================
 // КЛАСС МАШИНЫ СОСТОЯНИЙ
@@ -135,7 +136,7 @@ export class TileStateMachine {
       // REMOVED (терминальное состояние)
       // -------------------------------------------------------------------------
       case 'REMOVED':
-        return null; // Никакие события не обрабатываются
+        return null;
       
       // -------------------------------------------------------------------------
       // SPAWNER_RETURNING (промежуточное)
@@ -231,20 +232,34 @@ export class TileStateMachine {
     switch (event.type) {
       case 'CELL_FOUND':
         if (event.payload.isFree) {
+          const scale = event.payload.scale ?? 1;
+          const baseSize = event.payload.baseTileSize ?? DEFAULT_TILE_SIZE.width;
+          
           return {
             nextState: 'PLACED',
             contextUpdates: {
               currentCell: { col: event.payload.col, row: event.payload.row },
               targetCell: { col: event.payload.col, row: event.payload.row },
-              isAnimating: false,
+              isAnimating: true,
               isInSpawner: false,
             },
             actions: [
               {
                 type: 'ANIMATE_TO_POSITION',
                 payload: {
-                  x: 0, // будет вычислено в хуке на основе col/row
+                  col: event.payload.col,
+                  row: event.payload.row,
+                  x: 0,
                   y: 0,
+                  duration: DEFAULT_TILE_CONFIG.animationDuration,
+                  baseTileSize: baseSize, 
+                },
+              },
+              {
+                type: 'ANIMATE_SIZE',
+                payload: {
+                  width: baseSize * scale,  // 🔥 Базовый размер * scale
+                  height: baseSize * scale,
                   duration: DEFAULT_TILE_CONFIG.animationDuration,
                 },
               },
@@ -252,7 +267,6 @@ export class TileStateMachine {
             logMessage: `Snapped to cell (${event.payload.col}, ${event.payload.row})`,
           };
         } else {
-          // Ячейка занята
           return this.createReturnToSpawnerTransition('Cell occupied');
         }
       
@@ -319,6 +333,15 @@ export class TileStateMachine {
             { type: 'CALLBACK', payload: () => this.releaseCell() },
           ],
           logMessage: 'Tile removed from grid',
+        };
+      
+      // 🔥 Игнорируем ANIMATION_COMPLETE в PLACED (анимация уже завершена)
+      case 'ANIMATION_COMPLETE':
+        return {
+          nextState: 'PLACED',
+          contextUpdates: { isAnimating: false },
+          actions: [],
+          logMessage: 'Placement animation completed',
         };
       
       default:

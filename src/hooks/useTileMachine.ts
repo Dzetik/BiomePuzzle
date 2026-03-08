@@ -8,7 +8,6 @@ import {
   useEffect, 
   useCallback, 
   useRef, 
-  useMemo 
 } from 'react';
 import { Animated } from 'react-native';
 import { TileStateMachine } from '../state/tileMachine';
@@ -20,21 +19,16 @@ import {
   UseTileMachineOptions,
 } from '../state';
 import { FEATURE_FLAGS, DEFAULT_TILE_CONFIG } from '../state';
+import { GridService } from '../services/GridService';
+import { DEFAULT_TILE_SIZE } from '../constants/tile';
 
 // ============================================================================
 // ТИПЫ ВОЗВРАЩАЕМОГО ЗНАЧЕНИЯ ХУКА
 // ============================================================================
 export interface UseTileMachineReturn {
-  /** Текущее логическое состояние плитки */
   state: TileState;
-  
-  /** Функция отправки событий в машину */
   send: (event: TileEvent) => void;
-  
-  /** Контекст плитки (для чтения, не для мутации) */
   context: TileContext | null;
-  
-  /** Animated values для привязки к стилям */
   animated: {
     position: Animated.ValueXY;
     size: {
@@ -42,8 +36,6 @@ export interface UseTileMachineReturn {
       height: Animated.Value;
     };
   };
-  
-  /** Отладочная информация (только в dev режиме) */
   debug?: {
     history: Array<{
       fromState: TileState;
@@ -121,6 +113,9 @@ export const useTileMachine = ({
     lastAction: MachineAction | null;
   }>({ history: [], lastAction: null });
   
+  // 🔥 Счётчик незавершённых анимаций
+  const animationsPendingRef = useRef(0);
+  
   // -------------------------------------------------------------------------
   // 4. ФУНКЦИЯ ВЫПОЛНЕНИЯ ДЕЙСТВИЙ (анимации и сайд-эффекты)
   // -------------------------------------------------------------------------
@@ -130,75 +125,104 @@ export const useTileMachine = ({
     
     switch (action.type) {
       case 'UPDATE_POSITION_IMMEDIATE': {
-        // Мгновенное обновление позиции (без анимации, для драга)
         anim.position.setValue(action.payload);
         break;
       }
       
       case 'ANIMATE_TO_POSITION': {
-        const { x, y, duration, onComplete } = action.payload;
+        const { x, y, duration, onComplete, col, row, baseTileSize } = action.payload;
+        
+        // 🔥 Если переданы col/row, вычисляем позицию через GridService
+        let targetX = x;
+        let targetY = y;
+        
+        if (col !== undefined && row !== undefined) {
+          // 🔥 Передаём базовый размер (или дефолт)
+          const snapPos = GridService.getSnapPosition(
+            col, 
+            row, 
+            baseTileSize ?? DEFAULT_TILE_SIZE.width
+          );
+          if (snapPos) {
+            targetX = snapPos.x;
+            targetY = snapPos.y;
+          }
+        }
         
         anim.position.stopAnimation();
         
-        // ✅ ИСПОЛЬЗУЕМ timing ВМЕСТО spring ДЛЯ КОНТРОЛЯ ДЛИТЕЛЬНОСТИ
+        animationsPendingRef.current++;
+        
         Animated.timing(anim.position, {
-            toValue: { x, y },
-            duration: duration || DEFAULT_TILE_CONFIG.animationDuration, // ✅ duration работает здесь
-            useNativeDriver: false,
+          toValue: { x: targetX, y: targetY },
+          duration: duration || DEFAULT_TILE_CONFIG.animationDuration,
+          useNativeDriver: false,
         }).start(() => {
+          animationsPendingRef.current--;
+          
+          // 🔥 Отправляем ANIMATION_COMPLETE только когда все анимации завершены
+          if (animationsPendingRef.current === 0) {
             machineRef.current?.send({ type: 'ANIMATION_COMPLETE' });
-            onComplete?.();
+          }
+          
+          onComplete?.();
         });
         break;
       }
-
-        case 'ANIMATE_SIZE': {
+      
+      case 'ANIMATE_SIZE': {
         const { width, height, duration, onComplete } = action.payload;
         
         anim.size.width.stopAnimation();
         anim.size.height.stopAnimation();
         
-        // ✅ timing для размера тоже
+        animationsPendingRef.current++;
+        
         Animated.parallel([
-            Animated.timing(anim.size.width, {
+          Animated.timing(anim.size.width, {
             toValue: width,
             duration: duration || DEFAULT_TILE_CONFIG.animationDuration,
             useNativeDriver: false,
-            }),
-            Animated.timing(anim.size.height, {
+          }),
+          Animated.timing(anim.size.height, {
             toValue: height,
             duration: duration || DEFAULT_TILE_CONFIG.animationDuration,
             useNativeDriver: false,
-            }),
+          }),
         ]).start(() => {
-            onComplete?.();
+          animationsPendingRef.current--;
+          
+          // 🔥 Отправляем ANIMATION_COMPLETE только когда все анимации завершены
+          if (animationsPendingRef.current === 0) {
+            machineRef.current?.send({ type: 'ANIMATION_COMPLETE' });
+          }
+          
+          onComplete?.();
         });
         break;
       }
       
       case 'STOP_ANIMATIONS': {
-        // Экстренная остановка всех анимаций
         anim.position.stopAnimation();
         anim.size.width.stopAnimation();
         anim.size.height.stopAnimation();
+        animationsPendingRef.current = 0;
         break;
       }
       
       case 'CALLBACK': {
-        // Произвольный колбэк (освобождение ячейки и т.п.)
         action.payload();
         break;
       }
     }
     
-    // Сохраняем последнее действие для отладки
     if (FEATURE_FLAGS.SHOW_TILE_DEBUG) {
       setDebugInfo(prev => ({ ...prev, lastAction: action }));
     }
   }, []);
   
   // -------------------------------------------------------------------------
-  // 5. ФУНКЦИЯ ОТПРАВКИ СОБЫТИЙ (главный публичный API)
+  // 5. ФУНКЦИЯ ОТПРАВКИ СОБЫТИЙ
   // -------------------------------------------------------------------------
   const send = useCallback((event: TileEvent) => {
     if (!machineRef.current) return;
@@ -206,22 +230,25 @@ export const useTileMachine = ({
     const prevState = machineRef.current.getState();
     const result = machineRef.current.send(event);
     
-    if (!result) return; // Событие проигнорировано
+    if (!result) return;
     
-    // Обновляем React state только если состояние изменилось
     if (result.nextState !== prevState) {
       setCurrentState(result.nextState);
       
-      // Вызываем внешние колбэки
+      // 🔥 Обработка размещения плитки (занятие ячейки)
       if (result.nextState === 'PLACED' && onPlaced) {
         const ctx = machineRef.current?.getContext();
         if (ctx?.targetCell) {
+          // Занимаем ячейку через GridService
+          GridService.occupyCell(ctx.targetCell.col, ctx.targetCell.row, ctx.tileId);
           onPlaced(ctx.targetCell);
         }
       }
+      
       if (result.nextState === 'SPAWNER_IDLE' && onReturned) {
         onReturned();
       }
+      
       if (onStateChange) {
         const ctx = machineRef.current?.getContext();
         if (ctx) {
@@ -233,7 +260,6 @@ export const useTileMachine = ({
     // Выполняем действия (анимации)
     result.actions.forEach(executeAction);
     
-    // Обновляем отладочную информацию
     if (FEATURE_FLAGS.SHOW_TILE_DEBUG) {
       setDebugInfo({
         history: machineRef.current?.getHistory() || [],
@@ -243,17 +269,15 @@ export const useTileMachine = ({
   }, [executeAction, onPlaced, onReturned, onStateChange]);
   
   // -------------------------------------------------------------------------
-  // 6. ПОДПИСКА НА ИЗМЕНЕНИЯ ПОЗИЦИИ (для drag move без ре-рендеров)
+  // 6. ПОДПИСКА НА ИЗМЕНЕНИЯ ПОЗИЦИИ
   // -------------------------------------------------------------------------
   useEffect(() => {
     const anim = animatedValuesRef.current?.position;
     if (!anim) return;
     
-    // Подписываемся на изменения позиции для обновления контекста
     const listenerId = anim.addListener((value) => {
       const ctx = machineRef.current?.getContext();
       if (ctx) {
-        // Обновляем позицию в контексте (не вызывает ре-рендер)
         ctx.position = { x: value.x || 0, y: value.y || 0 };
       }
     });
@@ -268,14 +292,12 @@ export const useTileMachine = ({
   // -------------------------------------------------------------------------
   useEffect(() => {
     return () => {
-      // Останавливаем все анимации при размонтировании
       const anim = animatedValuesRef.current;
       if (anim) {
         anim.position.stopAnimation();
         anim.size.width.stopAnimation();
         anim.size.height.stopAnimation();
       }
-      // Сбрасываем рефы
       machineRef.current = null;
     };
   }, []);

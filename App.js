@@ -1,5 +1,5 @@
 // ========================================
-// ГЛАВНЫЙ ФАЙЛ ПРИЛОЖЕНИЯ - С ЗАЩИТОЙ ОТ UNDEFINED
+// ГЛАВНЫЙ ФАЙЛ ПРИЛОЖЕНИЯ - FSM INTEGRATION
 // ========================================
 import React, { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { View, StyleSheet, StatusBar } from 'react-native';
@@ -23,9 +23,11 @@ import { GridProvider } from './src/context/GridContext';
 // Утилиты и константы
 import { getSpawnerSize } from './src/constants/spawner';
 import { DEFAULT_TILE_SIZE } from './src/constants/tile';
-// ✅ ИСПРАВЛЕНО: SpawnerService вместо spawnerUtils
 import { SpawnerService } from './src/services/SpawnerService';
 import { getSnapToCellPosition } from './src/utils/gridUtils';
+
+// FSM
+import { FEATURE_FLAGS } from './src/state';
 
 const testTexture = require('./assets/images/textures/test1.png');
 
@@ -41,26 +43,25 @@ const ZoomHandler = ({ children }) => {
   });
   return (
     <GestureDetector gesture={pinchGesture}>
-      <View style={{ flex: 1 }}>
-        {children}
-      </View>
+      <View style={{ flex: 1 }}>{children}</View>
     </GestureDetector>
   );
 };
 
 // ========================================
-// Компонент для отрисовки размещённых плиток
+// Размещённые плитки (рендерятся из контекста)
 // ========================================
 const PlacedTiles = () => {
   const { getAllTiles } = useTiles();
   const { scale } = useZoom();
   const { offset } = useGrid();
-  const [tiles, setTiles] = useState([]);
+  
+  // 🔥 Вызываем напрямую, без useState/useEffect
+  const tiles = getAllTiles();
 
-  useEffect(() => {
-    const placedTiles = getAllTiles();
-    setTiles(placedTiles);
-  }, [getAllTiles]);
+  if (process.env.NODE_ENV !== 'production') {
+    console.log('[PlacedTiles] Рендер, плиток:', tiles.length);
+  }
 
   return (
     <>
@@ -68,10 +69,9 @@ const PlacedTiles = () => {
         const cellSize = DEFAULT_TILE_SIZE.width;
         const tileSize = {
           width: cellSize * scale,
-          height: cellSize * scale
+          height: cellSize * scale,
         };
 
-        // ✅ ЗАЩИТА: offset?.x || 0, offset?.y || 0
         const position = getSnapToCellPosition(
           tileSize,
           tile.col,
@@ -101,39 +101,18 @@ const PlacedTiles = () => {
 // Основной игровой контент
 // ========================================
 const GameContent = () => {
-  const { getSpawnerTile, createSpawnerTile } = useTiles();
+  const { getSpawnerTile, createSpawnerTile, addTile } = useTiles();
   const spawnerPos = useSpawner();
+  const { offset } = useGrid();
   const [isInitialized, setIsInitialized] = useState(false);
 
   const activeTileIdRef = useRef(null);
   const hasActiveTileRef = useRef(false);
 
-  // 🔥 ТЕСТ useTileMachine (удалите после проверки)
-  useEffect(() => {
-    const testAdapter = async () => {
-      try {
-        const { FEATURE_FLAGS } = await import('./src/state');
-        const adapter = await import('./src/hooks/useDraggable');
-        
-        console.log('🔄 [ADAPTER]'.repeat(5));
-        console.log('🔄 USE_TILE_FSM:', FEATURE_FLAGS.USE_TILE_FSM);
-        console.log('🔄 useDraggable:', typeof adapter.useDraggable);
-        console.log('🔄 useDraggableLegacy:', typeof adapter.useDraggableLegacy);
-        console.log('🔄 useDraggableFSM:', typeof adapter.useDraggableFSM);
-        console.log('🔄 [ADAPTER]'.repeat(5));
-        
-      } catch (e) {
-        console.error('❌ [ADAPTER] Error:', e);
-      }
-    };
-    
-    testAdapter();
-  }, []);
-  // 🔥 КОНЕЦ ТЕСТА
-
+  // Инициализация первой плитки в спавнере
   useEffect(() => {
     if (spawnerPos?.size > 0 && !isInitialized) {
-      console.log('[App] Инициализация спавнера');
+      console.log('[App] 🟢 Инициализация спавнера');
       const tile = createSpawnerTile();
       if (tile?.id) {
         activeTileIdRef.current = tile.id;
@@ -149,15 +128,14 @@ const GameContent = () => {
     if (spawnerTile?.id) {
       activeTileIdRef.current = spawnerTile.id;
       hasActiveTileRef.current = true;
-      console.log('[App] Обновлён activeTileId:', spawnerTile.id);
     }
   }, [spawnerTile?.id]);
 
+  // Вычисление начальной позиции плитки
   const getInitialPosition = useCallback(() => {
     if (spawnerPos?.size > 0) {
       const spawnerSize = getSpawnerSize();
       const initialTileSize = { width: spawnerSize, height: spawnerSize };
-      // ✅ ИСПРАВЛЕНО: SpawnerService.getTilePosition
       return SpawnerService.getTilePosition(initialTileSize, spawnerPos);
     }
     return { x: 0, y: 0 };
@@ -165,38 +143,67 @@ const GameContent = () => {
 
   const initialPosition = useMemo(() => getInitialPosition(), [getInitialPosition]);
 
+  // 🔥 КОЛБЭК ПРИ РАЗМЕЩЕНИИ ПЛИТКИ
+  const handleTilePlaced = useCallback(
+    (cell) => {
+      console.log('[App] ✅ Tile placed at:', cell);
+
+      // 🔥 addTile уже вызван в useDraggableFSM!
+      // Здесь только создаём новую плитку в спавнере
+      const newTile = createSpawnerTile();
+      if (newTile?.id) {
+        activeTileIdRef.current = newTile.id;
+        hasActiveTileRef.current = true;
+      }
+    },
+    [createSpawnerTile]  // 🔥 Убрали addTile из зависимостей
+  );
+
+  // 🔥 Используем адаптер useDraggable (FSM или Legacy)
   const draggableTile = useDraggable(
     spawnerTile,
     activeTileIdRef.current,
-    initialPosition
+    initialPosition,
+    handleTilePlaced // 🔥 Передаём колбэк размещения
   );
 
+  // 🔥 Отладочное логирование (только смена состояния)
+  const prevStateRef = useRef(null);
   useEffect(() => {
-    if (draggableTile?.position && typeof draggableTile.position.addListener === 'function') {
-      const listener = draggableTile.position.addListener((value) => {
-        // console.log('[App] Позиция плитки:', value);
-      });
-      return () => draggableTile.position.removeListener(listener);
-    }
-  }, [draggableTile?.position]);
+    if (draggableTile?.state !== prevStateRef.current) {
+      console.log('[App] 🎮 FSM State:', draggableTile?.state);
+      prevStateRef.current = draggableTile?.state;
 
-  const shouldRenderActiveTile = hasActiveTileRef.current && draggableTile?.position;
+      if (draggableTile?.state === 'PLACED') {
+        console.log('[App] ✅ Tile placed:', draggableTile?.debug?.currentCell);
+      }
+    }
+  }, [draggableTile?.state, draggableTile?.debug]);
+
+  // 🔥 Показываем активную плитку ТОЛЬКО когда она не размещена
+  const shouldRenderActiveTile =
+    hasActiveTileRef.current && draggableTile?.position && draggableTile?.state !== 'PLACED';
 
   return (
     <View style={styles.gameContainer}>
-      {/* ✅ ДОБАВЛЕНО: GridView и SpawnerCellView для инициализации GridContext */}
+      {/* GridView и SpawnerCellView для инициализации контекстов */}
       <GridView />
       <SpawnerCellView />
+      
+      {/* Размещённые плитки из контекста */}
       <PlacedTiles />
+
+      {/* Активная плитка (только если не PLACED) */}
       {shouldRenderActiveTile && (
-        <TileView 
-          textureSource={testTexture}
-          position={draggableTile.position}
-          width={draggableTile.width}
-          height={draggableTile.height}
-          panHandlers={draggableTile.panHandlers}
-          tileId={activeTileIdRef.current || 'temp'}
-        />
+        <GestureDetector gesture={draggableTile.panHandlers}>
+          <TileView
+            textureSource={testTexture}
+            position={draggableTile.position}
+            width={draggableTile.width}
+            height={draggableTile.height}
+            tileId={activeTileIdRef.current || 'temp'}
+          />
+        </GestureDetector>
       )}
     </View>
   );
