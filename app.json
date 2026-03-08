@@ -3,6 +3,9 @@
     "name": "BiomePuzzle",
     "slug": "BiomePuzzle",
     "version": "1.0.0",
+    "experiments": {
+      "tsconfigPaths": true
+    },
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",

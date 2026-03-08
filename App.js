@@ -108,6 +108,29 @@ const GameContent = () => {
   const activeTileIdRef = useRef(null);
   const hasActiveTileRef = useRef(false);
 
+  // 🔥 ТЕСТ useTileMachine (удалите после проверки)
+  useEffect(() => {
+    const testAdapter = async () => {
+      try {
+        const { FEATURE_FLAGS } = await import('./src/state');
+        const adapter = await import('./src/hooks/useDraggable');
+        
+        console.log('🔄 [ADAPTER]'.repeat(5));
+        console.log('🔄 USE_TILE_FSM:', FEATURE_FLAGS.USE_TILE_FSM);
+        console.log('🔄 useDraggable:', typeof adapter.useDraggable);
+        console.log('🔄 useDraggableLegacy:', typeof adapter.useDraggableLegacy);
+        console.log('🔄 useDraggableFSM:', typeof adapter.useDraggableFSM);
+        console.log('🔄 [ADAPTER]'.repeat(5));
+        
+      } catch (e) {
+        console.error('❌ [ADAPTER] Error:', e);
+      }
+    };
+    
+    testAdapter();
+  }, []);
+  // 🔥 КОНЕЦ ТЕСТА
+
   useEffect(() => {
     if (spawnerPos?.size > 0 && !isInitialized) {
       console.log('[App] Инициализация спавнера');

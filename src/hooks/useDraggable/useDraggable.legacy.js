@@ -1,14 +1,23 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { useZoom } from './useZoom';
-import { useGrid } from '../context/GridContext';
-import { useSpawner } from './useSpawner';
-import { useTiles } from '../context/TilesContext';
-import { getSpawnerSize } from '../constants/spawner';
-import { useTileAnimations } from './useDraggable/useTileAnimations';
-import { useTileTargetCell } from './useDraggable/useTileTargetCell';
-import { useTileSpawnerLogic } from './useDraggable/useTileSpawnerLogic';
-import { useTilePlacement } from './useDraggable/useTilePlacement';
-import { useTileDragHandler } from './useDraggable/useTileDragHandler';
+
+// ✅ Хуки из родительской папки (добавлен ../)
+import { useZoom } from '../useZoom';
+import { useSpawner } from '../useSpawner';
+// import { useTile } from '../useTile'; // если используется
+
+// ✅ Контексты (теперь ../../ потому что на 2 уровня вверх)
+import { useGrid } from '../../context/GridContext';
+import { useTiles } from '../../context/TilesContext';
+
+// ✅ Константы и утилиты (теперь ../../)
+import { getSpawnerSize } from '../../constants/spawner';
+
+// ✅ Под-хуки из той же папки (теперь ./)
+import { useTileAnimations } from './useTileAnimations';
+import { useTileTargetCell } from './useTileTargetCell';
+import { useTileSpawnerLogic } from './useTileSpawnerLogic';
+import { useTilePlacement } from './useTilePlacement';
+import { useTileDragHandler } from './useTileDragHandler';
 
 const useDraggable = (initialTileData = null, tileId = null, externalInitialPosition = null) => {
   const { scale } = useZoom();
@@ -288,4 +297,5 @@ const useDraggable = (initialTileData = null, tileId = null, externalInitialPosi
   };
 };
 
+export { useDraggable as useDraggableLegacy };
 export default useDraggable;
