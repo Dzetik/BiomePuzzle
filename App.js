@@ -1,5 +1,5 @@
 // ========================================
-// ГЛАВНЫЙ ФАЙЛ ПРИЛОЖЕНИЯ - ИСПРАВЛЕННЫЙ
+// ГЛАВНЫЙ ФАЙЛ ПРИЛОЖЕНИЯ - С ЗАЩИТОЙ ОТ UNDEFINED
 // ========================================
 import React, { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { View, StyleSheet, StatusBar } from 'react-native';
@@ -23,6 +23,7 @@ import { GridProvider } from './src/context/GridContext';
 // Утилиты и константы
 import { getSpawnerSize } from './src/constants/spawner';
 import { DEFAULT_TILE_SIZE } from './src/constants/tile';
+// ✅ ИСПРАВЛЕНО: SpawnerService вместо spawnerUtils
 import { SpawnerService } from './src/services/SpawnerService';
 import { getSnapToCellPosition } from './src/utils/gridUtils';
 
@@ -33,13 +34,11 @@ const testTexture = require('./assets/images/textures/test1.png');
 // ========================================
 const ZoomHandler = ({ children }) => {
   const { scale, setScale, MIN_SCALE, MAX_SCALE } = useZoom();
-
   const pinchGesture = Gesture.Pinch().onUpdate((event) => {
     const newScale = scale * event.scale;
     const clampedScale = Math.min(MAX_SCALE, Math.max(MIN_SCALE, newScale));
     setScale(clampedScale);
   });
-
   return (
     <GestureDetector gesture={pinchGesture}>
       <View style={{ flex: 1 }}>
@@ -72,13 +71,14 @@ const PlacedTiles = () => {
           height: cellSize * scale
         };
 
+        // ✅ ЗАЩИТА: offset?.x || 0, offset?.y || 0
         const position = getSnapToCellPosition(
           tileSize,
           tile.col,
           tile.row,
           scale,
-          offset.x,
-          offset.y
+          offset?.x || 0,
+          offset?.y || 0
         );
 
         return (
@@ -104,12 +104,10 @@ const GameContent = () => {
   const { getSpawnerTile, createSpawnerTile } = useTiles();
   const spawnerPos = useSpawner();
   const [isInitialized, setIsInitialized] = useState(false);
-  
-  // ✅ REFS ДЛЯ ОТСЛЕЖИВАНИЯ АКТИВНОЙ ПЛИТКИ
+
   const activeTileIdRef = useRef(null);
   const hasActiveTileRef = useRef(false);
 
-  // Инициализация спавнера
   useEffect(() => {
     if (spawnerPos?.size > 0 && !isInitialized) {
       console.log('[App] Инициализация спавнера');
@@ -123,8 +121,7 @@ const GameContent = () => {
   }, [spawnerPos, createSpawnerTile, isInitialized]);
 
   const spawnerTile = getSpawnerTile();
-  
-  // ✅ Обновляем ref при изменении spawnerTile
+
   useEffect(() => {
     if (spawnerTile?.id) {
       activeTileIdRef.current = spawnerTile.id;
@@ -137,21 +134,20 @@ const GameContent = () => {
     if (spawnerPos?.size > 0) {
       const spawnerSize = getSpawnerSize();
       const initialTileSize = { width: spawnerSize, height: spawnerSize };
-      return SpawnerService.getSnapToSpawnerPosition(initialTileSize, spawnerPos);
+      // ✅ ИСПРАВЛЕНО: SpawnerService.getTilePosition
+      return SpawnerService.getTilePosition(initialTileSize, spawnerPos);
     }
     return { x: 0, y: 0 };
   }, [spawnerPos]);
 
   const initialPosition = useMemo(() => getInitialPosition(), [getInitialPosition]);
 
-  // ✅ Всегда вызываем useDraggable с актуальным ID из ref
   const draggableTile = useDraggable(
     spawnerTile,
-    activeTileIdRef.current,  // ✅ Используем ref, не spawnerTile?.id
+    activeTileIdRef.current,
     initialPosition
   );
 
-  // Подписка на позицию
   useEffect(() => {
     if (draggableTile?.position && typeof draggableTile.position.addListener === 'function') {
       const listener = draggableTile.position.addListener((value) => {
@@ -161,15 +157,14 @@ const GameContent = () => {
     }
   }, [draggableTile?.position]);
 
-  // ✅ УСЛОВИЕ РЕНДЕРА: проверяем hasActiveTileRef, а не spawnerTile
   const shouldRenderActiveTile = hasActiveTileRef.current && draggableTile?.position;
 
   return (
     <View style={styles.gameContainer}>
+      {/* ✅ ДОБАВЛЕНО: GridView и SpawnerCellView для инициализации GridContext */}
       <GridView />
       <SpawnerCellView />
       <PlacedTiles />
-      
       {shouldRenderActiveTile && (
         <TileView 
           textureSource={testTexture}
@@ -177,7 +172,7 @@ const GameContent = () => {
           width={draggableTile.width}
           height={draggableTile.height}
           panHandlers={draggableTile.panHandlers}
-          tileId={activeTileIdRef.current || 'temp'}  // ✅ Используем ref
+          tileId={activeTileIdRef.current || 'temp'}
         />
       )}
     </View>

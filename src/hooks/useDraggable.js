@@ -1,7 +1,3 @@
-// ========================================
-// ГЛАВНЫЙ ХУК ПЕРЕТАСКИВАНИЯ ПЛИТКИ
-// ✅ ВСЕ ХУКИ ВЫЗЫВАЮТСЯ НА КАЖДОМ РЕНДЕРЕ
-// ========================================
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useZoom } from './useZoom';
 import { useGrid } from '../context/GridContext';
@@ -15,52 +11,23 @@ import { useTilePlacement } from './useDraggable/useTilePlacement';
 import { useTileDragHandler } from './useDraggable/useTileDragHandler';
 
 const useDraggable = (initialTileData = null, tileId = null, externalInitialPosition = null) => {
-  // ========================================
-  // ✅ 1. ВСЕ ХУКИ КОНТЕКСТА — ВСЕГДА ВЫЗЫВАЮТСЯ
-  // ========================================
   const { scale } = useZoom();
   const { offset } = useGrid();
   const spawnerPos = useSpawner();
-  const {
-    returnTileToSpawner,
-    createSpawnerTile,
-  } = useTiles();
+  const { returnTileToSpawner, createSpawnerTile } = useTiles();
+  const spawnerSize = getSpawnerSize();
 
-  // ========================================
-  // ✅ 2. ВСЕ СОСТОЯНИЯ — ВСЕГДА ВЫЗЫВАЮТСЯ
-  // ========================================
   const [isSpawnerReady, setIsSpawnerReady] = useState(false);
   const [isInSpawner, setIsInSpawner] = useState(true);
   const [currentTileData, setCurrentTileData] = useState(initialTileData);
   const isFreshSpawnerTileRef = useRef(false);
-
-  // ========================================
-  // 3. ЭФФЕКТЫ — ВСЕГДА ВЫЗЫВАЮТСЯ
-  // ========================================
-  useEffect(() => {
-    if (initialTileData?.id && initialTileData.id !== currentTileData?.id) {
-      setCurrentTileData(initialTileData);
-    }
-  }, [initialTileData, currentTileData]);
-
-  const [startPosition, setStartPosition] = useState(
-    externalInitialPosition || { x: 0, y: 0 }
-  );
-  
-  const [initialPositionSet, setInitialPositionSet] = useState(false);
-
-  useEffect(() => {
-    if (currentTileData?.id && spawnerPos?.size > 0) {
-      setStartPosition({ x: spawnerPos.x, y: spawnerPos.y });
-    }
-  }, [currentTileData?.id, spawnerPos]);
-
+  const [startPosition, setStartPosition] = useState(externalInitialPosition || { x: 0, y: 0 });
   const targetCellRef = useRef(null);
-  const spawnerSize = getSpawnerSize();
+  const isTilePositionInitializedRef = useRef(false);
+  
+  // 🔥 НОВЫЙ: отслеживаем инициализацию размера
+  const isTileSizeInitializedRef = useRef(false);
 
-  // ========================================
-  // 4. ГЕТТЕРЫ
-  // ========================================
   const getCurrentTileId = useCallback(() => {
     if (currentTileData?.id && currentTileData.id !== 'temp' && currentTileData.id.startsWith('tile-')) {
       return currentTileData.id;
@@ -72,50 +39,25 @@ const useDraggable = (initialTileData = null, tileId = null, externalInitialPosi
   }, [currentTileData, tileId]);
 
   const currentTileIdRef = useRef(null);
-
   useEffect(() => {
     const id = getCurrentTileId();
-    if (id) {
-      currentTileIdRef.current = id;
-    }
+    if (id) currentTileIdRef.current = id;
   }, [getCurrentTileId]);
-
   const getCurrentTileIdRef = useCallback(() => currentTileIdRef.current, []);
 
   const currentTileDataRef = useRef(currentTileData);
-  useEffect(() => { currentTileDataRef.current = currentTileData; }, [currentTileData]);
+  useEffect(() => {
+    currentTileDataRef.current = currentTileData;
+  }, [currentTileData]);
   const getCurrentTileDataRef = useCallback(() => currentTileDataRef.current, []);
 
-  // ========================================
-  // 5. ИНИЦИАЛИЗАЦИЯ
-  // ========================================
   const currentTileId = getCurrentTileId();
-  // ✅ НЕ делаем ранний возврат здесь!
 
-  useEffect(() => {
-    if (spawnerPos && spawnerPos.size > 0) {
-      setIsSpawnerReady(true);
-    }
-  }, [spawnerPos]);
-
-  useEffect(() => {
-    if (isSpawnerReady && externalInitialPosition && !initialPositionSet) {
-      setStartPosition(externalInitialPosition);
-      setInitialPositionSet(true);
-    }
-  }, [isSpawnerReady, externalInitialPosition, initialPositionSet]);
-
-  const initialTileSize = { width: spawnerSize, height: spawnerSize };
-
-  // ========================================
-  // ✅ 6. ПОД-ХУКИ — ВЫЗЫВАЮТСЯ ВСЕГДА!
-  // ========================================
-  // Даже если currentTileId = null, хуки должны вызываться
-  // Они сами обработают null внутри
+  // 🔥 КЛЮЧЕВОЕ: initialSize всегда равен размеру спавнера для новой плитки
   const animations = useTileAnimations({
     tileId: currentTileId || 'temp',
     initialPosition: startPosition,
-    initialSize: initialTileSize,
+    initialSize: { width: spawnerSize, height: spawnerSize },
     scale,
     offset,
     isInSpawner,
@@ -149,60 +91,48 @@ const useDraggable = (initialTileData = null, tileId = null, externalInitialPosi
     tileData: currentTileData,
   });
 
- // ========================================
-// ОБРАБОТКА РАЗМЕЩЕНИЯ - БЕЗ setTimeout
-// ========================================
-const handleTilePlaced = useCallback((placedTileData, targetCell) => {
-  if (!placedTileData?.id) {
-    console.log('[Tile] Нет данных плитки при размещении');
-    return;
-  }
-  
-  console.log(`[Tile ${placedTileData.id}] Плитка размещена в [${targetCell.col},${targetCell.row}]`);
+  const handleTilePlaced = useCallback(
+    (placedTileData, targetCell) => {
+      if (!placedTileData?.id) return;
+      try {
+        const newTile = createSpawnerTile();
+        targetCellRef.current = null;
+        setCurrentTileData(newTile);
+        returnTileToSpawner(newTile);
 
-  const newTile = createSpawnerTile();
-  console.log(`[Tile] Создана новая плитка в спавнере: ${newTile?.id}`);
+        // 🔥 Сбрасываем флаги инициализации для новой плитки
+        isTilePositionInitializedRef.current = false;
+        isTileSizeInitializedRef.current = false;
 
-  // 1. Сбрасываем целевую ячейку
-  targetCellRef.current = null;
-
-  // 2. Обновляем данные плитки
-  setCurrentTileData(newTile);
-  returnTileToSpawner(newTile);
-
-  // ✅ 3. АНИМАЦИЯ С КОЛЛБЭКОМ (вместо setTimeout)
-  if (spawnerPos && animations.position) {
-    const spawnerPosition = {
-      x: spawnerPos.x,
-      y: spawnerPos.y,
-    };
-    
-    console.log('[Tile] Анимация возврата в спавнер с onComplete');
-    
-    // ✅ Анимация позиции с коллбэком
-    animations.animateToPosition(spawnerPosition, false, () => {
-      console.log('[Tile] Анимация позиции завершена');
-      
-      // ✅ Теперь устанавливаем isInSpawner
-      setIsInSpawner(true);
-      console.log('[Tile] setIsInSpawner(true)');
-      
-      // ✅ И размер для новой плитки
-      const spawnerSize = { width: getSpawnerSize(), height: getSpawnerSize() };
-      animations.animateSize(spawnerSize, true, () => {
-        console.log('[Tile] Анимация размера завершена');
-        
-        // ✅ Сброс флага
-        isFreshSpawnerTileRef.current = false;
-        console.log('[Tile] Сброс флага isFreshSpawnerTileRef');
-      });
-    });
-  } else {
-    // Fallback если анимация не доступна
-    setIsInSpawner(true);
-    isFreshSpawnerTileRef.current = false;
-  }
-}, [createSpawnerTile, returnTileToSpawner, targetCellRef, setIsInSpawner, spawnerPos, animations.position, animations.animateToPosition, animations.animateSize, getSpawnerSize]);
+        if (
+          spawnerPos &&
+          typeof spawnerPos.x === 'number' &&
+          typeof spawnerPos.y === 'number' &&
+          animations.position
+        ) {
+          animations.animateToPosition(
+            { x: spawnerPos.x, y: spawnerPos.y },
+            false,
+            () => {
+              setIsInSpawner(true);
+              // 🔥 КЛЮЧЕВОЕ: размер устанавливаем immediately, без анимации
+              animations.animateSize(
+                { width: spawnerSize, height: spawnerSize },
+                true,
+                () => { isFreshSpawnerTileRef.current = false; }
+              );
+            }
+          );
+        } else {
+          setIsInSpawner(true);
+          isFreshSpawnerTileRef.current = false;
+        }
+      } catch (e) {
+        console.error('[useDraggable] Error in handleTilePlaced:', e);
+      }
+    },
+    [createSpawnerTile, returnTileToSpawner, spawnerPos, animations, spawnerSize]
+  );
 
   const placementLogic = useTilePlacement({
     getTileId: getCurrentTileIdRef,
@@ -232,16 +162,69 @@ const handleTilePlaced = useCallback((placedTileData, targetCell) => {
     acquireTileFromSpawner: spawnerLogic.acquireTileFromSpawner,
   });
 
-  // ========================================
-  // 8. СЛУШАТЕЛИ — ВСЕГДА
-  // ========================================
+  useEffect(() => {
+    if (initialTileData?.id && initialTileData.id !== currentTileData?.id) {
+      setCurrentTileData(initialTileData);
+      isTilePositionInitializedRef.current = false;
+      isTileSizeInitializedRef.current = false;
+    }
+  }, [initialTileData, currentTileData]);
+
+  useEffect(() => {
+    if (
+      currentTileData?.id &&
+      spawnerPos &&
+      typeof spawnerPos.x === 'number' &&
+      typeof spawnerPos.y === 'number' &&
+      spawnerPos.size > 0 &&
+      offset &&
+      typeof offset.x === 'number' &&
+      typeof offset.y === 'number'
+    ) {
+      setStartPosition({ x: spawnerPos.x, y: spawnerPos.y });
+    }
+  }, [currentTileData?.id, spawnerPos, offset]);
+
+  useEffect(() => {
+    if (
+      spawnerPos &&
+      typeof spawnerPos.x === 'number' &&
+      typeof spawnerPos.y === 'number' &&
+      spawnerPos.size > 0
+    ) {
+      setIsSpawnerReady(true);
+    }
+  }, [spawnerPos]);
+
   useEffect(() => {
     if (!animations.position) return;
+    
+    const extractValue = (val) => {
+      if (typeof val === 'number') return val;
+      if (val && typeof val.__getValue === 'function') {
+        try { return val.__getValue(); } catch { return val._value ?? 0; }
+      }
+      return 0;
+    };
+
     const listener = animations.position.addListener((value) => {
-      spawnerLogic.handlePositionChange(value);
+      try {
+        const x = extractValue(value?.x);
+        const y = extractValue(value?.y);
+        
+        if (typeof x !== 'number' || typeof y !== 'number') return;
+        if (!isSpawnerReady || !spawnerPos || typeof spawnerPos.x !== 'number') return;
+        
+        spawnerLogic.handlePositionChange({ x, y });
+      } catch (e) {
+        console.error('[Effect 4] Listener error:', e);
+      }
     });
-    return () => animations.position.removeListener(listener);
-  }, [animations.position, spawnerLogic]);
+
+    return () => {
+      animations.position.removeListener(listener);
+    };
+  }, []);
 
   useEffect(() => {
     if (!isSpawnerReady) return;
@@ -251,19 +234,51 @@ const handleTilePlaced = useCallback((placedTileData, targetCell) => {
   }, [isInSpawner, targetCellRef, targetCellLogic, currentTileData, isSpawnerReady]);
 
   useEffect(() => {
-    if (isFreshSpawnerTileRef.current) return;
-    if (isInSpawner && isSpawnerReady && spawnerPos && animations.position) {
-      const spawnerPosition = {
+    if (isFreshSpawnerTileRef.current || !isSpawnerReady || isTilePositionInitializedRef.current) {
+      if (isSpawnerReady && !isTilePositionInitializedRef.current) {
+        isTilePositionInitializedRef.current = true;
+      }
+      return;
+    }
+    
+    if (
+      isInSpawner &&
+      spawnerPos &&
+      typeof spawnerPos.x === 'number' &&
+      typeof spawnerPos.y === 'number' &&
+      animations.position &&
+      offset &&
+      typeof offset.x === 'number' &&
+      typeof offset.y === 'number'
+    ) {
+      animations.position.setValue({
         x: spawnerPos.x + (spawnerPos.size - spawnerSize) / 2,
         y: spawnerPos.y + (spawnerPos.size - spawnerSize) / 2,
-      };
-      animations.position.setValue(spawnerPosition);
+      });
+      isTilePositionInitializedRef.current = true;
     }
-  }, [isInSpawner, isSpawnerReady, spawnerPos, scale, offset.x, offset.y, animations.position, spawnerSize]);
+  }, [isInSpawner, isSpawnerReady, spawnerPos, animations.position, offset, spawnerSize]);
 
-  // ========================================
-  // ✅ 9. ВОЗВРАТ — ВСЕГДА ОДИНАКОВЫЙ
-  // ========================================
+  // 🔥 НОВЫЙ: Effect для инициализации размера (только один раз)
+  useEffect(() => {
+    if (!animations.width || !animations.height) return;
+    if (isFreshSpawnerTileRef.current || !isSpawnerReady || isTileSizeInitializedRef.current) {
+      if (isSpawnerReady && !isTileSizeInitializedRef.current) {
+        isTileSizeInitializedRef.current = true;
+      }
+      return;
+    }
+    
+    if (isInSpawner) {
+      // 🔥 КЛЮЧЕВОЕ: устанавливаем размер спавнера immediately, без анимации
+      animations.animateSize(
+        { width: spawnerSize, height: spawnerSize },
+        true
+      );
+      isTileSizeInitializedRef.current = true;
+    }
+  }, [isInSpawner, isSpawnerReady, animations.width, animations.height, animations.animateSize, spawnerSize]);
+
   return {
     position: animations.position || { x: 0, y: 0 },
     width: animations.width || spawnerSize,

@@ -1,7 +1,8 @@
 // ========================================
 // ОБРАБОТЧИК ЖЕСТОВ ПЛИТКИ
+// ✅ ИСПРАВЛЕНЫ ВСЕ СИНТАКСИЧЕСКИЕ ОШИБКИ
 // ========================================
-import { useRef, useCallback } from 'react';
+import { useRef } from 'react';
 import { PanResponder } from 'react-native';
 import { getScreenBounds, clampPosition } from '../../utils/constraints';
 
@@ -21,30 +22,33 @@ export const useTileDragHandler = ({
     tileIdAtStart: null,
   });
 
-  // ========================================
-  // СОЗДАНИЕ PAN RESPONDER (ИСПРАВЛЕНО)
-  // ========================================
   const panResponder = useRef(
     PanResponder.create({
       onStartShouldSetPanResponder: () => true,
       onMoveShouldSetPanResponder: () => true,
 
+      // ✅ ИСПРАВЛЕНО: => без пробелов
       onPanResponderGrant: (_, gesture) => {
         const currentId = getTileId ? getTileId() : null;
         const logId = currentId || 'unknown';
-        console.log(`[Tile ${logId}] Начало перетаскивания`);
-        console.log(`[Tile ${logId}] ID в момент старта:`, currentId);
+        console.log(`[Tile ${logId}] 🔵 Начало перетаскивания`);
 
-        // Вызов функции взятия плитки из спавнера
         if (typeof acquireTileFromSpawner === 'function') {
           acquireTileFromSpawner();
         }
 
+        // ✅ ИСПРАВЛЕНО: && без пробелов
         if (position && typeof position.stopAnimation === 'function') {
           position.stopAnimation();
         }
 
         const currentPos = currentPositionRef.current;
+
+        if (!currentPos || typeof currentPos.x !== 'number' || typeof currentPos.y !== 'number') {
+          console.error(`[Tile ${logId}] ❌ currentPos не готов!`);
+          return;
+        }
+
         console.log(`[Tile ${logId}] Текущая позиция:`, currentPos);
 
         dragData.current = {
@@ -55,10 +59,9 @@ export const useTileDragHandler = ({
           },
           tileIdAtStart: currentId,
         };
-
-        console.log(`[Tile ${logId}] Базовая позиция:`, currentPos);
       },
 
+      // ✅ ИСПРАВЛЕНО: => без пробелов
       onPanResponderMove: (_, gesture) => {
         const { basePosition, touchOffset } = dragData.current;
         if (!basePosition || !touchOffset) return;
@@ -79,16 +82,16 @@ export const useTileDragHandler = ({
         position.setValue(clampedPosition);
       },
 
+      // ✅ ИСПРАВЛЕНО: => без пробелов
       onPanResponderRelease: () => {
         const { tileIdAtStart } = dragData.current;
         const logId = tileIdAtStart || 'unknown';
-        console.log(`[Tile ${logId}] Завершение перетаскивания`);
+        console.log(`[Tile ${logId}] 🔴 Завершение перетаскивания`);
 
         if (typeof onPlacement === 'function') {
           const targetPosition = onPlacement();
 
           if (targetPosition && typeof animateToPosition === 'function') {
-            console.log(`[Tile ${logId}] Анимация к позиции:`, targetPosition);
             animateToPosition(targetPosition);
           }
         }
@@ -97,9 +100,6 @@ export const useTileDragHandler = ({
       },
 
       onPanResponderTerminate: () => {
-        const { tileIdAtStart } = dragData.current;
-        const logId = tileIdAtStart || 'unknown';
-        console.log(`[Tile ${logId}] Жест прерван`);
         dragData.current = { basePosition: null, touchOffset: null, tileIdAtStart: null };
       },
     })

@@ -1,3 +1,7 @@
+// ========================================
+// ХУК РАЗМЕЩЕНИЯ ПЛИТКИ
+// ✅ ДОБАВЛЕНО ДЕТАЛЬНОЕ ЛОГИРОВАНИЕ
+// ========================================
 import { useCallback, useRef } from 'react';
 import { useZoom } from '../useZoom';
 import { useGrid } from '../../context/GridContext';
@@ -25,40 +29,79 @@ export const useTilePlacement = ({
   const wasPlacedRef = useRef(false);
   const scaleRef = useRef(scale);
   const offsetRef = useRef(offset);
-
+  
   scaleRef.current = scale;
   offsetRef.current = offset;
-
+  
   const getLogId = useCallback(() => {
     const id = getTileId ? getTileId() : null;
     return id || 'unknown';
   }, [getTileId]);
-
+  
   const getActualId = useCallback(() => {
     const id = getTileId ? getTileId() : null;
     return id || null;
   }, [getTileId]);
-
+  
+  // ✅ ЛОГ: перед доступом к spawnerPos.x/y
   const checkGravityZone = useCallback((position) => {
-    return SpawnerService.isInGravityZone(
+    const logId = getLogId();
+    console.log(`[Tile ${logId}] checkGravityZone - проверка spawnerPos:`, {
+      hasSpawnerPos: !!spawnerPos,
+      spawnerPosX: spawnerPos?.x,
+      spawnerPosY: spawnerPos?.y,
+      spawnerPosSize: spawnerPos?.size,
+    });
+    
+    if (
+      !spawnerPos || 
+      typeof spawnerPos.x !== 'number' || 
+      typeof spawnerPos.y !== 'number'
+    ) {
+      console.log(`[Tile ${logId}] checkGravityZone - spawnerPos не готов`);
+      return false;
+    }
+    
+    const result = SpawnerService.isInGravityZone(
       position,
       currentTileSize.current,
       spawnerPos
     );
-  }, [currentTileSize, spawnerPos]);
-
+    
+    console.log(`[Tile ${logId}] checkGravityZone результат:`, result);
+    return result;
+  }, [currentTileSize, spawnerPos, getLogId]);
+  
   const snapToSpawner = useCallback(() => {
     const logId = getLogId();
     console.log(`[Tile ${logId}] ПРИТЯГИВАЕМ К СПАВНЕРУ`);
-
+    
     if (!isInSpawner && targetCellRef.current) {
       releaseCurrentCell();
     }
 
-    const spawnerPosition = SpawnerService.getSnapToSpawnerPosition(
+    // ✅ ЛОГ: перед доступом к spawnerPos.x/y
+    console.log(`[Tile ${logId}] snapToSpawner - проверка spawnerPos:`, {
+      hasSpawnerPos: !!spawnerPos,
+      spawnerPosX: spawnerPos?.x,
+      spawnerPosY: spawnerPos?.y,
+    });
+
+    if (
+      !spawnerPos || 
+      typeof spawnerPos.x !== 'number' || 
+      typeof spawnerPos.y !== 'number'
+    ) {
+      console.error(`[Tile ${logId}] ❌ spawnerPos не готов!`, spawnerPos);
+      return currentPositionRef.current;
+    }
+
+    const spawnerPosition = SpawnerService.getTilePosition(
       currentTileSize.current, 
       spawnerPos
     );
+    
+    console.log(`[Tile ${logId}] Позиция спавнера:`, spawnerPosition);
 
     setInSpawner(true);
     targetCellRef.current = null;
@@ -66,16 +109,14 @@ export const useTilePlacement = ({
 
     return spawnerPosition;
   }, [isInSpawner, targetCellRef, releaseCurrentCell, currentTileSize, spawnerPos, setInSpawner, getLogId]);
-
+  
   const snapToGridAndPlace = useCallback(() => {
     const actualId = getActualId();
     const logId = getLogId();
-    
     if (!actualId) {
       console.log(`[Tile ${logId}] Нет ID плитки, не можем разместить`);
       return null;
     }
-
     console.log(`[Tile ${actualId}] Притягиваем к сетке`);
 
     const currentPos = currentPositionRef.current;
@@ -86,6 +127,24 @@ export const useTilePlacement = ({
 
     const currentScale = scaleRef.current;
     const currentOffset = offsetRef.current;
+
+    // ✅ ЛОГ: перед доступом к offset.x/y
+    console.log(`[Tile ${actualId}] snapToGridAndPlace - проверка offset:`, {
+      hasOffset: !!currentOffset,
+      offsetX: currentOffset?.x,
+      offsetY: currentOffset?.y,
+      offsetXType: typeof currentOffset?.x,
+      offsetYType: typeof currentOffset?.y,
+    });
+
+    if (
+      !currentOffset || 
+      typeof currentOffset.x !== 'number' || 
+      typeof currentOffset.y !== 'number'
+    ) {
+      console.error(`[Tile ${actualId}] ❌ offset не готов!`, currentOffset);
+      return null;
+    }
 
     const targetCell = findNearestCell(
       centerX, 
@@ -128,7 +187,7 @@ export const useTilePlacement = ({
     console.log(`[Tile ${actualId}] Ячейка занята или ошибка, возврат`);
     return null;
   }, [currentPositionRef, currentTileSize, isCellFree, tryOccupyCell, setOutOfSpawner, onTilePlaced, getTileData, getActualId, getLogId]);
-
+  
   const revertToPrevious = useCallback(() => {
     const logId = getLogId();
     console.log(`[Tile ${logId}] Возврат в предыдущее положение`);
@@ -137,6 +196,29 @@ export const useTilePlacement = ({
       const tileSize = currentTileSize.current;
       const currentScale = scaleRef.current;
       const currentOffset = offsetRef.current;
+      
+      // ✅ ЛОГ: перед доступом к offset.x/y
+      console.log(`[Tile ${logId}] revertToPrevious - проверка offset:`, {
+        hasOffset: !!currentOffset,
+        offsetX: currentOffset?.x,
+        offsetY: currentOffset?.y,
+      });
+      
+      if (
+        !currentOffset || 
+        typeof currentOffset.x !== 'number' || 
+        typeof currentOffset.y !== 'number'
+      ) {
+        console.log(`[Tile ${logId}] offset не готов, возврат в спавнер`);
+        if (
+          spawnerPos && 
+          typeof spawnerPos.x === 'number' && 
+          typeof spawnerPos.y === 'number'
+        ) {
+          return SpawnerService.getTilePosition(currentTileSize.current, spawnerPos);
+        }
+        return currentPositionRef.current;
+      }
       
       return getSnapToCellPosition(
         tileSize,
@@ -148,15 +230,22 @@ export const useTilePlacement = ({
       );
     } 
 
-    return SpawnerService.getSnapToSpawnerPosition(currentTileSize.current, spawnerPos);
-  }, [isInSpawner, targetCellRef, currentTileSize, spawnerPos, getLogId]);
+    if (
+      spawnerPos && 
+      typeof spawnerPos.x === 'number' && 
+      typeof spawnerPos.y === 'number'
+    ) {
+      return SpawnerService.getTilePosition(currentTileSize.current, spawnerPos);
+    }
 
+    return currentPositionRef.current;
+  }, [isInSpawner, targetCellRef, currentTileSize, spawnerPos, getLogId]);
+  
   const handlePlacement = useCallback(() => {
     const currentPos = currentPositionRef.current;
     const inGravityZone = checkGravityZone(currentPos);
     const actualId = getTileId ? getTileId() : null;
     const logId = actualId || 'unknown';
-
     console.log(`[Tile ${logId}] В зоне притяжения:`, inGravityZone);
     console.log(`[Tile ${logId}] Реальный ID:`, actualId);
 
@@ -174,7 +263,7 @@ export const useTilePlacement = ({
       return revertToPrevious();
     }
   }, [currentPositionRef, checkGravityZone, snapToSpawner, snapToGridAndPlace, revertToPrevious, getTileId]);
-
+  
   return {
     handlePlacement,
     checkGravityZone,
