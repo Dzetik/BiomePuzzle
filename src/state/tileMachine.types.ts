@@ -51,9 +51,16 @@ export type TileEvent =
   
   // Удалить плитку
   | { type: 'REMOVE' }
+
+  | { type: 'RESET_TO_SPAWNER' }  
+
+  | { type: 'RETURNED_TO_SPAWNER' } 
+
+  | { type: 'DELAYED_ANIMATION_COMPLETE' }
   
   // Анимация завершена (внутреннее событие)
   | { type: 'ANIMATION_COMPLETE' };
+  
 
 // ============================================================================
 // КОНТЕКСТ ПЛИТКИ (TILE CONTEXT) — единый источник истины
@@ -128,7 +135,12 @@ export type MachineAction =
   // Остановить все анимации (для edge cases)
   | { type: 'STOP_ANIMATIONS' }
   // Выполнить произвольный колбэк (освобождение ячейки и т.п.)
-  | { type: 'CALLBACK'; payload: () => void };
+  | { type: 'CALLBACK'; payload: () => void }
+  // 🔥 НОВОЕ: Отложенная отправка ANIMATION_COMPLETE
+  | { 
+      type: 'DELAYED_ANIMATION_COMPLETE'; 
+      payload: { delay: number }  // ← Правильный тип!
+    };
 
 // ============================================================================
 // РЕЗУЛЬТАТ ПЕРЕХОДА (TRANSITION RESULT)
@@ -137,6 +149,8 @@ export interface TransitionResult {
   /** Новое состояние после перехода */
   nextState: TileState;
   
+  prevState?: TileState;
+
   /** Частичное обновление контекста (merge) */
   contextUpdates: Partial<TileContext>;
   

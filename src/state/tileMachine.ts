@@ -42,6 +42,7 @@ export class TileStateMachine {
   // ГЛАВНЫЙ МЕТОД: ОТПРАВКА СОБЫТИЯ
   // ============================================================================
   public send(event: TileEvent): TransitionResult | null {
+    // 🔥 СОХРАНЯЕМ состояние ДО изменений
     const prevState = this.currentState;
     
     // Получаем переход
@@ -73,7 +74,11 @@ export class TileStateMachine {
       );
     }
     
-    return transition;
+    // 🔥 ВОЗВРАЩАЕМ prevState вместе с результатом
+    return {
+      ...transition,
+      prevState,  // ← Добавьте это!
+    };
   }
 
   // ============================================================================
@@ -324,6 +329,33 @@ export class TileStateMachine {
           ],
           logMessage: 'Returning placed tile to spawner',
         };
+
+      // 🔥 НОВОЕ: Явный сброс после возврата (для повторной активации)
+      case 'RETURNED_TO_SPAWNER':
+        return {
+          nextState: 'SPAWNER_IDLE',
+          contextUpdates: {
+            isInSpawner: true,
+            isAnimating: false,
+            currentCell: undefined,
+            targetCell: undefined,
+          },
+          actions: [
+            {
+              type: 'UPDATE_POSITION_IMMEDIATE',
+              payload: { ...this.context.spawnerPosition },
+            },
+            {
+              type: 'ANIMATE_SIZE',
+              payload: {
+                width: this.context.spawnerPosition.width,
+                height: this.context.spawnerPosition.height,
+                duration: DEFAULT_TILE_CONFIG.animationDuration,
+              },
+            },
+          ],
+          logMessage: 'Returned to spawner (failed placement), ready for drag',
+        };  
       
       case 'REMOVE':
         return {
@@ -343,26 +375,23 @@ export class TileStateMachine {
           actions: [],
           logMessage: 'Placement animation completed',
         };
-      
-      default:
-        return null;
-    }
-  }
 
-  private handleReturningToSpawn(event: TileEvent): TransitionResult | null {
-    switch (event.type) {
-      case 'ANIMATION_COMPLETE':
+      case 'RESET_TO_SPAWNER':
         return {
           nextState: 'SPAWNER_IDLE',
           contextUpdates: {
             isInSpawner: true,
             isAnimating: false,
-            position: {
-              x: this.context.spawnerPosition.x,
-              y: this.context.spawnerPosition.y,
-            },
+            currentCell: undefined,
+            targetCell: undefined,
           },
           actions: [
+            // 🔥 Позиция: мгновенно в центр спавнера
+            {
+              type: 'UPDATE_POSITION_IMMEDIATE',
+              payload: { ...this.context.spawnerPosition },
+            },
+            // 🔥 НОВОЕ: Размер: анимация до размера спавнера
             {
               type: 'ANIMATE_SIZE',
               payload: {
@@ -372,7 +401,78 @@ export class TileStateMachine {
               },
             },
           ],
+          logMessage: 'Reset to spawner for new tile (size + position)',
+        };
+      
+      default:
+        return null;
+    }
+  }
+
+  private handleReturningToSpawn(event: TileEvent): TransitionResult | null {
+    switch (event.type) {
+      case 'DELAYED_ANIMATION_COMPLETE':
+      // 🔥 Переход в SPAWNER_IDLE после задержки
+      return {
+        nextState: 'SPAWNER_IDLE',
+        contextUpdates: {
+          isInSpawner: true,
+          isAnimating: false,
+          currentCell: undefined,
+          targetCell: undefined,
+        },
+        actions: [],
+        logMessage: 'Returned to spawner after delay',
+      };
+
+      case 'ANIMATION_COMPLETE':
+        return {
+          nextState: 'SPAWNER_IDLE',
+          contextUpdates: {
+            isInSpawner: true,
+            isAnimating: false,
+            currentCell: undefined,
+            targetCell: undefined,
+          },
+          actions: [],  // ← Пустой массив!
           logMessage: 'Returned to spawner, now idle',
+        };
+      
+      // 🔥 НОВОЕ: Отправляем ANIMATION_COMPLETE автоматически через 300ms
+      case 'NO_CELL':
+        return {
+          nextState: 'RETURNING_TO_SPAWN',
+          contextUpdates: {
+            currentCell: undefined,
+            isAnimating: true,
+            targetPosition: this.context.spawnerPosition,
+          },
+          actions: [
+            {
+              type: 'ANIMATE_TO_POSITION',
+              payload: {
+                x: this.context.spawnerPosition.x,
+                y: this.context.spawnerPosition.y,
+                duration: DEFAULT_TILE_CONFIG.animationDuration,
+              },
+            },
+            {
+              type: 'ANIMATE_SIZE',
+              payload: {
+                width: this.context.spawnerPosition.width,
+                height: this.context.spawnerPosition.height,
+                duration: DEFAULT_TILE_CONFIG.animationDuration,
+              },
+            },
+            // 🔥 Автоматически отправляем ANIMATION_COMPLETE через 300ms
+            {
+              type: 'DELAYED_ANIMATION_COMPLETE',
+              payload: { 
+                delay: (DEFAULT_TILE_CONFIG.animationDuration || 300) + 50 
+              },
+            },
+          ],
+          logMessage: 'Returning to spawner: No cell found',
         };
       
       case 'REMOVE':
@@ -380,7 +480,7 @@ export class TileStateMachine {
           nextState: 'REMOVED',
           contextUpdates: { isAnimating: false },
           actions: [{ type: 'STOP_ANIMATIONS' }],
-          logMessage: 'Tile removed while returning to spawner',
+          logMessage: 'Tile removed while returning',
         };
       
       default:

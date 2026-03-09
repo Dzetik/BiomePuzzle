@@ -23,6 +23,20 @@ import { GridService } from '../services/GridService';
 import { DEFAULT_TILE_SIZE } from '../constants/tile';
 
 // ============================================================================
+// 🔥 ГЛОБАЛЬНЫЙ REFS ДЛЯ ОТСЛЕЖИВАНИЯ ЗАВЕРШЁННЫХ АНИМАЦИЙ
+// ============================================================================
+// Предотвращает двойной вызов completeAnimation (из колбэка + timeout)
+const completedAnimationsRef = new Map<string, boolean>();
+
+// Очистка старых записей каждые 5 секунд
+setInterval(() => {
+  if (completedAnimationsRef.size > 50) {
+    const keys = Array.from(completedAnimationsRef.keys());
+    keys.slice(0, 25).forEach(key => completedAnimationsRef.delete(key));
+  }
+}, 5000);
+
+// ============================================================================
 // ТИПЫ ВОЗВРАЩАЕМОГО ЗНАЧЕНИЯ ХУКА
 // ============================================================================
 export interface UseTileMachineReturn {
@@ -78,6 +92,9 @@ export const useTileMachine = ({
     };
   }
   
+  // Ref для хранения актуальной send функции
+  const sendRef = useRef<(event: TileEvent) => void>(() => {});
+
   // -------------------------------------------------------------------------
   // 2. ИНИЦИАЛИЗАЦИЯ МАШИНЫ СОСТОЯНИЙ (только один раз)
   // -------------------------------------------------------------------------
@@ -132,12 +149,12 @@ export const useTileMachine = ({
       case 'ANIMATE_TO_POSITION': {
         const { x, y, duration, onComplete, col, row, baseTileSize } = action.payload;
         
-        // 🔥 Если переданы col/row, вычисляем позицию через GridService
+        const actionId = `pos-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+        
         let targetX = x;
         let targetY = y;
         
         if (col !== undefined && row !== undefined) {
-          // 🔥 Передаём базовый размер (или дефолт)
           const snapPos = GridService.getSnapPosition(
             col, 
             row, 
@@ -153,30 +170,88 @@ export const useTileMachine = ({
         
         animationsPendingRef.current++;
         
+        console.log('[useTileMachine] 🎬 ANIMATE_TO_POSITION start:', { 
+          actionId,
+          animationsPending: animationsPendingRef.current,
+          target: { x: targetX, y: targetY }
+        });
+        
+        let animationCompleted = false;
+        
+        const completeAnimation = () => {
+          if (animationCompleted) return;
+          animationCompleted = true;
+          
+          animationsPendingRef.current--;
+          
+          console.log('[useTileMachine] 🎬 ANIMATE_TO_POSITION complete:', { 
+            actionId,
+            animationsPending: animationsPendingRef.current 
+          });
+          
+          if (animationsPendingRef.current === 0) {
+            console.log('[useTileMachine] 📬 Sending ANIMATION_COMPLETE via sendRef');
+            // 🔥 КЛЮЧЕВОЕ: Используем sendRef.current вместо machineRef.current.send()
+            sendRef.current({ type: 'ANIMATION_COMPLETE' });
+          }
+          
+          onComplete?.();
+        };
+        
         Animated.timing(anim.position, {
           toValue: { x: targetX, y: targetY },
           duration: duration || DEFAULT_TILE_CONFIG.animationDuration,
           useNativeDriver: false,
-        }).start(() => {
-          animationsPendingRef.current--;
-          
-          // 🔥 Отправляем ANIMATION_COMPLETE только когда все анимации завершены
-          if (animationsPendingRef.current === 0) {
-            machineRef.current?.send({ type: 'ANIMATION_COMPLETE' });
+        }).start(completeAnimation);
+        
+        // 🔥 Фолбэк таймаут
+        setTimeout(() => {
+          if (!animationCompleted) {
+            console.log('[useTileMachine] ⚠️ ANIMATE_TO_POSITION timeout fallback');
+            completeAnimation();
           }
-          
-          onComplete?.();
-        });
+        }, 2000);
+        
         break;
       }
       
       case 'ANIMATE_SIZE': {
         const { width, height, duration, onComplete } = action.payload;
         
+        const actionId = `size-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+        
         anim.size.width.stopAnimation();
         anim.size.height.stopAnimation();
         
         animationsPendingRef.current++;
+        
+        console.log('[useTileMachine] 🎬 ANIMATE_SIZE start:', { 
+          actionId,
+          animationsPending: animationsPendingRef.current,
+          target: { width, height }
+        });
+        
+        let animationCompleted = false;
+        
+        const completeAnimation = () => {
+          if (animationCompleted) return;
+          animationCompleted = true;
+          
+          animationsPendingRef.current--;
+          
+          console.log('[useTileMachine] 🎬 ANIMATE_SIZE complete:', { 
+            actionId,
+            animationsPending: animationsPendingRef.current 
+          });
+          
+          if (animationsPendingRef.current === 0) {
+            console.log('[useTileMachine] 📬 Sending ANIMATION_COMPLETE via sendRef');
+            // 🔥 КЛЮЧЕВОЕ: Используем sendRef.current вместо machineRef.current.send()
+            sendRef.current({ type: 'ANIMATION_COMPLETE' });
+          }
+          
+          onComplete?.();
+        };
         
         Animated.parallel([
           Animated.timing(anim.size.width, {
@@ -189,16 +264,16 @@ export const useTileMachine = ({
             duration: duration || DEFAULT_TILE_CONFIG.animationDuration,
             useNativeDriver: false,
           }),
-        ]).start(() => {
-          animationsPendingRef.current--;
-          
-          // 🔥 Отправляем ANIMATION_COMPLETE только когда все анимации завершены
-          if (animationsPendingRef.current === 0) {
-            machineRef.current?.send({ type: 'ANIMATION_COMPLETE' });
+        ]).start(completeAnimation);
+        
+        // 🔥 Фолбэк таймаут
+        setTimeout(() => {
+          if (!animationCompleted) {
+            console.log('[useTileMachine] ⚠️ ANIMATE_SIZE timeout fallback');
+            completeAnimation();
           }
-          
-          onComplete?.();
-        });
+        }, 2000);
+        
         break;
       }
       
@@ -214,6 +289,17 @@ export const useTileMachine = ({
         action.payload();
         break;
       }
+      
+      // 🔥 НОВОЕ: Обработка отложенного завершения (если используете)
+      case 'DELAYED_ANIMATION_COMPLETE': {
+        const delay = action.payload?.delay || 350;
+        console.log('[useTileMachine] ⏱️ Scheduling DELAYED_ANIMATION_COMPLETE in', delay, 'ms');
+        setTimeout(() => {
+          console.log('[useTileMachine] 📬 Sending DELAYED_ANIMATION_COMPLETE via sendRef');
+          sendRef.current({ type: 'DELAYED_ANIMATION_COMPLETE' });
+        }, delay);
+        break;
+      }
     }
     
     if (FEATURE_FLAGS.SHOW_TILE_DEBUG) {
@@ -221,44 +307,69 @@ export const useTileMachine = ({
     }
   }, []);
   
-  // -------------------------------------------------------------------------
-  // 5. ФУНКЦИЯ ОТПРАВКИ СОБЫТИЙ
-  // -------------------------------------------------------------------------
+  // ============================================================================
+  // 5. ФУНКЦИЯ ОТПРАВКИ СОБЫТИЙ (С ОТЛАДКОЙ)
+  // ============================================================================
   const send = useCallback((event: TileEvent) => {
     if (!machineRef.current) return;
     
-    const prevState = machineRef.current.getState();
+    // 🔥 Отладка входа
+    console.log('[useTileMachine] 📥 send() called:', {
+      eventType: event.type,
+      tileId: machineRef.current.getContext()?.tileId,
+    });
+    
+    const machineStateBefore = machineRef.current.getState();
     const result = machineRef.current.send(event);
+    const machineStateAfter = result?.nextState;
     
-    if (!result) return;
+    console.log('[useTileMachine] 🔍 machineState BEFORE:', machineStateBefore);
+    console.log('[useTileMachine] 🔍 machineState AFTER:', machineStateAfter);
     
-    if (result.nextState !== prevState) {
+    if (!result) {
+      console.log('[useTileMachine] ⚠️ No transition for event:', event.type);
+      return;
+    }
+    
+    const stateChanged = result.nextState !== machineStateBefore;
+    
+    console.log('[useTileMachine] 🔄 stateChanged check:', {
+      prevState: machineStateBefore,
+      nextState: result.nextState,
+      willCallSetState: stateChanged,
+    });
+    
+    if (stateChanged) {
+      console.log('[useTileMachine] ✅ State CHANGED — calling setCurrentState');
       setCurrentState(result.nextState);
       
-      // 🔥 Обработка размещения плитки (занятие ячейки)
+      // 🔥 Обработка размещения
       if (result.nextState === 'PLACED' && onPlaced) {
         const ctx = machineRef.current?.getContext();
         if (ctx?.targetCell) {
-          // Занимаем ячейку через GridService
           GridService.occupyCell(ctx.targetCell.col, ctx.targetCell.row, ctx.tileId);
           onPlaced(ctx.targetCell);
         }
       }
       
+      // 🔥 Обработка возврата в спавнер
       if (result.nextState === 'SPAWNER_IDLE' && onReturned) {
         onReturned();
       }
       
+      // 🔥 Общий колбэк
       if (onStateChange) {
         const ctx = machineRef.current?.getContext();
         if (ctx) {
           onStateChange(result.nextState, ctx);
         }
       }
+    } else {
+      console.log('[useTileMachine] ⚠️ State UNCHANGED — skipping setCurrentState');
     }
     
-    // Выполняем действия (анимации)
-    result.actions.forEach(executeAction);
+    // 🔥 Выполняем действия
+    result.actions.forEach(action => executeAction(action));
     
     if (FEATURE_FLAGS.SHOW_TILE_DEBUG) {
       setDebugInfo({
@@ -266,7 +377,28 @@ export const useTileMachine = ({
         lastAction: result.actions[0] || null,
       });
     }
-  }, [executeAction, onPlaced, onReturned, onStateChange]);
+    
+    console.log('[useTileMachine] 📤 send() completed');
+    
+  }, [executeAction, onPlaced, onReturned, onStateChange]);  // ← executeAction в зависимостях!
+
+  // 🔥 Обновляем sendRef после создания send
+  useEffect(() => {
+    sendRef.current = send;
+  }, [send]);
+
+  // 🔥 КРИТИЧНО: Синхронизация состояния с родителем
+  useEffect(() => {
+    console.log('[useTileMachine] 📢 currentState changed:', currentState);
+    
+    // 🔥 Форсируем уведомление родителя через onStateChange
+    if (onStateChange && machineRef.current) {
+      const ctx = machineRef.current.getContext();  
+      if (ctx) {
+        onStateChange(currentState, ctx);
+      }
+    }
+  }, [currentState, onStateChange]);
   
   // -------------------------------------------------------------------------
   // 6. ПОДПИСКА НА ИЗМЕНЕНИЯ ПОЗИЦИИ

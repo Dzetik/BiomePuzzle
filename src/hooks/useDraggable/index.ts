@@ -28,13 +28,19 @@ export interface UseDraggableReturn {
 export const useDraggable = (
   initialTileData: any = null,
   tileId: string | null = null,
-  externalInitialPosition: { x: number; y: number } | null = null
+  externalInitialPosition: { x: number; y: number } | null = null,
+  onPlaced?: (cell: { col: number; row: number }) => void
 ): UseDraggableReturn => {
   
   const useFSM = FEATURE_FLAGS.USE_TILE_FSM;
   
   if (useFSM) {
-    return useDraggableFSM(initialTileData, tileId, externalInitialPosition);
+    return useDraggableFSM(
+      initialTileData, 
+      tileId, 
+      externalInitialPosition, 
+      onPlaced  
+    );
   }
   
   return useDraggableLegacy(initialTileData, tileId, externalInitialPosition);

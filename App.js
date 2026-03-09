@@ -56,7 +56,6 @@ const PlacedTiles = () => {
   const { scale } = useZoom();
   const { offset } = useGrid();
   
-  // 🔥 Вызываем напрямую, без useState/useEffect
   const tiles = getAllTiles();
 
   if (process.env.NODE_ENV !== 'production') {
@@ -101,7 +100,7 @@ const PlacedTiles = () => {
 // Основной игровой контент
 // ========================================
 const GameContent = () => {
-  const { getSpawnerTile, createSpawnerTile, addTile } = useTiles();
+  const { getSpawnerTile, createSpawnerTile } = useTiles();
   const spawnerPos = useSpawner();
   const { offset } = useGrid();
   const [isInitialized, setIsInitialized] = useState(false);
@@ -144,27 +143,22 @@ const GameContent = () => {
   const initialPosition = useMemo(() => getInitialPosition(), [getInitialPosition]);
 
   // 🔥 КОЛБЭК ПРИ РАЗМЕЩЕНИИ ПЛИТКИ
-  const handleTilePlaced = useCallback(
-    (cell) => {
-      console.log('[App] ✅ Tile placed at:', cell);
+  const handleTilePlaced = useCallback((cell) => {
+    console.log('🔥 [1] handleTilePlaced START');
+    const newTile = createSpawnerTile();
+    console.log('🔥 [2] createSpawnerTile вернул:', newTile?.id);
+    if (newTile?.id) {
+      activeTileIdRef.current = newTile.id;
+      console.log('🔥 [3] activeTileIdRef обновлён');
+    }
+  }, [createSpawnerTile]);
 
-      // 🔥 addTile уже вызван в useDraggableFSM!
-      // Здесь только создаём новую плитку в спавнере
-      const newTile = createSpawnerTile();
-      if (newTile?.id) {
-        activeTileIdRef.current = newTile.id;
-        hasActiveTileRef.current = true;
-      }
-    },
-    [createSpawnerTile]  // 🔥 Убрали addTile из зависимостей
-  );
-
-  // 🔥 Используем адаптер useDraggable (FSM или Legacy)
+  // 🔥 🔥 🔥 КЛЮЧЕВОЕ: Объявление draggableTile (БЫЛО ПРОПУЩЕНО!)
   const draggableTile = useDraggable(
     spawnerTile,
     activeTileIdRef.current,
     initialPosition,
-    handleTilePlaced // 🔥 Передаём колбэк размещения
+    handleTilePlaced
   );
 
   // 🔥 Отладочное логирование (только смена состояния)
@@ -177,12 +171,27 @@ const GameContent = () => {
       if (draggableTile?.state === 'PLACED') {
         console.log('[App] ✅ Tile placed:', draggableTile?.debug?.currentCell);
       }
+
+      if (draggableTile?.state === 'SPAWNER_IDLE' && draggableTile?.isInSpawner) {
+        console.log('[App] ✅ Tile is ACTIVE in spawner, ready for drag');
+      }
     }
-  }, [draggableTile?.state, draggableTile?.debug]);
+  }, [draggableTile?.state, draggableTile?.debug, draggableTile?.isInSpawner]);
 
   // 🔥 Показываем активную плитку ТОЛЬКО когда она не размещена
   const shouldRenderActiveTile =
-    hasActiveTileRef.current && draggableTile?.position && draggableTile?.state !== 'PLACED';
+    hasActiveTileRef.current && 
+    draggableTile?.position && 
+    draggableTile?.state !== 'PLACED';
+
+  useEffect(() => {
+    console.log('[App] 🔍 shouldRenderActiveTile:', {
+      hasActiveTileRef: hasActiveTileRef.current,
+      hasPosition: !!draggableTile?.position,
+      state: draggableTile?.state,
+      shouldRender: shouldRenderActiveTile,
+    });
+  }, [draggableTile?.state, draggableTile?.position]);
 
   return (
     <View style={styles.gameContainer}>
