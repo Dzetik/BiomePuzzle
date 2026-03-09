@@ -26,8 +26,8 @@ import { DEFAULT_TILE_SIZE } from './src/constants/tile';
 import { SpawnerService } from './src/services/SpawnerService';
 import { getSnapToCellPosition } from './src/utils/gridUtils';
 
-// FSM
-import { FEATURE_FLAGS } from './src/state';
+import { TEXTURE_MAP, DEFAULT_TEXTURE } from './src/constants/textures';
+import { Tile } from './src/models/Tile';
 
 const testTexture = require('./assets/images/textures/test1.png');
 
@@ -56,34 +56,34 @@ const PlacedTiles = () => {
   const { scale } = useZoom();
   const { offset } = useGrid();
   
-  const tiles = getAllTiles();
+  const tiles = getAllTiles(); // Возвращает PlacedTileInfo[]
 
-  if (process.env.NODE_ENV !== 'production') {
+  if (__DEV__) {
     console.log('[PlacedTiles] Рендер, плиток:', tiles.length);
   }
 
   return (
     <>
-      {tiles.map((tile) => {
+      {tiles.map((entry) => {
+        const tile = entry.tile; // ← ЭКЗЕМПЛЯР Tile
         const cellSize = DEFAULT_TILE_SIZE.width;
-        const tileSize = {
-          width: cellSize * scale,
-          height: cellSize * scale,
-        };
-
+        
         const position = getSnapToCellPosition(
-          tileSize,
-          tile.col,
-          tile.row,
+          { width: cellSize * scale, height: cellSize * scale },
+          entry.col,
+          entry.row,
           scale,
           offset?.x || 0,
           offset?.y || 0
         );
 
+        // ← Получаем текстуру из маппинга
+        const textureSource = TEXTURE_MAP[tile.textureKey] || DEFAULT_TEXTURE;
+
         return (
           <TileView
             key={tile.id}
-            textureSource={testTexture}
+            textureSource={textureSource}
             position={position}
             width={cellSize * scale}
             height={cellSize * scale}
@@ -156,7 +156,7 @@ const GameContent = () => {
   // 🔥 🔥 🔥 КЛЮЧЕВОЕ: Объявление draggableTile (БЫЛО ПРОПУЩЕНО!)
   const draggableTile = useDraggable(
     spawnerTile,
-    activeTileIdRef.current,
+    spawnerTile?.id || null, 
     initialPosition,
     handleTilePlaced
   );
@@ -180,9 +180,29 @@ const GameContent = () => {
 
   // 🔥 Показываем активную плитку ТОЛЬКО когда она не размещена
   const shouldRenderActiveTile =
-    hasActiveTileRef.current && 
-    draggableTile?.position && 
-    draggableTile?.state !== 'PLACED';
+  hasActiveTileRef.current && 
+  draggableTile?.position?.x !== undefined && 
+  draggableTile?.position?.y !== undefined &&
+  draggableTile?.state !== 'PLACED' &&
+  spawnerTile !== null;
+
+  useEffect(() => {
+    if (__DEV__) {
+      console.log('[App] 🔍 shouldRenderActiveTile DEBUG:', {
+        hasActiveTileRef: hasActiveTileRef.current,
+        position: draggableTile?.position,
+        state: draggableTile?.state,
+        spawnerTileId: spawnerTile?.id,
+        shouldRender: shouldRenderActiveTile,
+      });
+    }
+  }, [
+    hasActiveTileRef.current,
+    draggableTile?.position,
+    draggableTile?.state,
+    spawnerTile?.id,
+    shouldRenderActiveTile,
+  ]);
 
   useEffect(() => {
     console.log('[App] 🔍 shouldRenderActiveTile:', {
@@ -203,14 +223,15 @@ const GameContent = () => {
       <PlacedTiles />
 
       {/* Активная плитка (только если не PLACED) */}
-      {shouldRenderActiveTile && (
+      {shouldRenderActiveTile && spawnerTile && (
         <GestureDetector gesture={draggableTile.panHandlers}>
           <TileView
-            textureSource={testTexture}
+            // ← ИСПРАВЛЕНО: используем TEXTURE_MAP
+            textureSource={TEXTURE_MAP[spawnerTile.textureKey] || DEFAULT_TEXTURE}
             position={draggableTile.position}
             width={draggableTile.width}
             height={draggableTile.height}
-            tileId={activeTileIdRef.current || 'temp'}
+            tileId={spawnerTile.id}
           />
         </GestureDetector>
       )}

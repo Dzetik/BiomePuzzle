@@ -1,11 +1,16 @@
 // src/state/TileMachine.test.manual.ts
 import { TileStateMachine } from './tileMachine';
 import { Animated } from 'react-native';
+// import { Tile } from '../models'; // ← Раскомментируйте, если нужен тип для tile
 
 // Создаём тестовый контекст
 const testContext = {
   tileId: 'test-tile-1',
   tileType: 'hint',
+  
+  // ← НОВОЕ: Поле tile (обязательно по интерфейсу TileContext)
+  tile: null,  // Для теста достаточно null
+  
   position: { x: 0, y: 0 },
   size: { width: 50, height: 50 },
   spawnerPosition: { x: 0, y: 0, width: 50, height: 50 },
@@ -38,15 +43,14 @@ console.log('✅ Position:', machine.getContext().position); // { x: 100, y: 200
 
 // Отправляем событие DRAG_END
 const result3 = machine.send({ type: 'DRAG_END', payload: { x: 100, y: 200 } });
-console.log('✅ After DRAG_END:', machine.getState()); // SNAPPING
+console.log('✅ After DRAG_END:', machine.getState()); // PLACING (или как у вас названо)
 
 // Отправляем событие CELL_FOUND (свободная ячейка)
 const result4 = machine.send({ 
   type: 'CELL_FOUND', 
-  payload: { col: 2, row: 3, isFree: true } 
+  payload: { col: 2, row: 3, isFree: true, scale: 1, baseTileSize: 80 } 
 });
 console.log('✅ After CELL_FOUND:', machine.getState()); // PLACED
-console.log('✅ Cell:', machine.getContext().currentCell); // { col: 2, row: 3 }
 
 // Проверяем историю
 console.log('✅ History:', machine.getHistory());

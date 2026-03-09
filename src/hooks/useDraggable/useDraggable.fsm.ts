@@ -18,6 +18,7 @@ import { useSpawner } from '../useSpawner';
 import { useGrid } from '../../context/GridContext';
 import { useTiles } from '../../context/TilesContext';
 import { GridService } from '../../services/GridService';
+import { Tile } from '../../models/Tile'; // ← ДОБАВЛЕНО: импорт класса Tile
 
 // ============================================================================
 // ГЛАВНЫЙ ХУК
@@ -26,11 +27,11 @@ import { GridService } from '../../services/GridService';
 // Используется в App.js для каждой активной плитки.
 // ============================================================================
 export const useDraggableFSM = (
-  initialTileData: any = null,    // Данные плитки (текстура, тип)
-  tileId: string | null = null,   // Уникальный идентификатор плитки
-  externalInitialPosition: { x: number; y: number } | null = null,  // Начальная позиция (опционально)
-  onPlaced?: (cell: { col: number; row: number }) => void,  // Колбэк успешного размещения
-  onReturned?: () => void  // Колбэк возврата в спавнер
+  initialTileData: Tile | null = null,  // ← Теперь это Tile, не any
+  tileId: string | null = null,
+  externalInitialPosition: { x: number; y: number } | null = null,
+  onPlaced?: (cell: { col: number; row: number }) => void,
+  onReturned?: () => void
 ): UseDraggableReturn => {
   
   // --------------------------------------------------------------------------
@@ -41,6 +42,7 @@ export const useDraggableFSM = (
   // Это нужно для обновления UI при изменении позиции во время драга.
   // --------------------------------------------------------------------------
   const [, forceUpdate] = useReducer(x => x + 1, 0);
+  const prevSpawnerTileIdRef = useRef<string | null>(null);
   
   // --------------------------------------------------------------------------
   // 2. ПОЛУЧЕНИЕ ДАННЫХ ИЗ КОНТЕКСТОВ
@@ -54,7 +56,7 @@ export const useDraggableFSM = (
   const { scale } = useZoom();
   const spawnerPos = useSpawner();
   const { offset } = useGrid();
-  const { spawnerTile, addTile } = useTiles();
+  const { spawnerTile, addTile, getSpawnerTile } = useTiles(); // ← ДОБАВЛЕНО: getSpawnerTile
   
   // --------------------------------------------------------------------------
   // 3. СТАБИЛЬНЫЕ REFS (не триггерят ре-рендеры)
@@ -77,6 +79,10 @@ export const useDraggableFSM = (
   
   // Флаг возврата в спавнер — предотвращает сброс плитки во время анимации возврата
   const isReturningRef = useRef(false);
+
+  // ← НОВОЕ: Ref для хранения ссылки на активный экземпляр Tile
+  // Нужно чтобы передать правильный объект в addTile при размещении
+  const currentTileRef = useRef<Tile | null>(null);
   
   // Обновляем scaleRef при изменении scale (без ре-рендера)
   scaleRef.current = scale || 1;
@@ -161,27 +167,49 @@ export const useDraggableFSM = (
   // Возвращает state, send, animated и context для управления плиткой.
   // --------------------------------------------------------------------------
   const { state, send, animated, context } = useTileMachine({
-    tileId: stableTileId.current!,  // Уникальный ID плитки
-    tileType: initialTileData?.type || 'default',  // Тип плитки
-    initialPosition: stableInitialPosition,  // Начальная позиция
-    spawnerPosition: {  // Позиция и размер спавнера
+    // ← ИСПРАВЛЕНО: берём ID из spawnerTile, не генерируем свой
+    tileId: spawnerTile?.id || stableTileId.current!,
+    
+    tileType: initialTileData?.textureKey || 'default',
+    initialPosition: stableInitialPosition,
+    spawnerPosition: {
       x: spawnerPosRef.current?.x || 0,
       y: spawnerPosRef.current?.y || 0,
       width: tileSize,
       height: tileSize,
     },
-    // Колбэк размещения плитки
+    
+    // ← НОВОЕ: Передаём экземпляр Tile в машину состояний
+    tile: currentTileRef.current || spawnerTile,
+    
     onPlaced: (cell) => {
-      // Добавляем плитку в TilesContext для сохранения в сетке
-      if (stableTileId.current) {
-        addTile(cell.col, cell.row, { id: stableTileId.current, texture: 'test1' });
+      if (currentTileRef.current) {
+        addTile(cell.col, cell.row, currentTileRef.current);
+        currentTileRef.current = null;
       }
-      // Вызываем внешний колбэк (в App.js создаётся новая плитка в спавнере)
       onPlaced?.(cell);
     },
-    // Колбэк возврата в спавнер
-    onReturned: () => onReturned?.(),
+    onReturned: () => {
+      currentTileRef.current = null;
+      onReturned?.();
+    },
   });
+
+  // ============================================================================
+  // СБРОС FSM ПРИ СМЕНЕ ПЛИТКИ В СПАВНЕРЕ
+  // ============================================================================
+  useEffect(() => {
+    if (spawnerTile?.id && spawnerTile.id !== prevSpawnerTileIdRef.current) {
+      positionRef.current = { ...stableInitialPosition };
+      send({ type: 'RESET_TO_SPAWNER' });
+      stableTileId.current = spawnerTile.id;
+      prevSpawnerTileIdRef.current = spawnerTile.id;
+      forceUpdate();
+      if (__DEV__) {
+        console.log(`[Draggable] FSM сброшен для новой плитки: ${spawnerTile.id}`);
+      }
+    }
+  }, [spawnerTile?.id, stableInitialPosition, send]);
 
   // --------------------------------------------------------------------------
   // 9. СИНХРОНИЗАЦИЯ POSITION REF С ANIMATED
@@ -257,6 +285,25 @@ export const useDraggableFSM = (
       isReturningRef.current = false;  // Возврат завершён
     }
   }, [state]);
+
+  // ============================================================================
+  // НОВЫЙ ЭФФЕКТ: Отслеживаем взятие плитки из спавнера
+  // ============================================================================
+  // Когда FSM переходит в состояние DRAGGING, мы берём плитку из контекста
+  // и сохраняем ссылку на неё в currentTileRef для дальнейшего использования.
+  // ============================================================================
+  useEffect(() => {
+    if (state === 'DRAGGING' && !currentTileRef.current) {
+      // Берём плитку из контекста (она должна быть там, так как мы её только что взяли)
+      const tile = getSpawnerTile();
+      if (tile) {
+        currentTileRef.current = tile;
+        if (__DEV__) {
+          console.log(`[Draggable] Плитка ${tile.id} захвачена для перетаскивания`);
+        }
+      }
+    }
+  }, [state, getSpawnerTile]); // ← getSpawnerTile в зависимостях
 
   // --------------------------------------------------------------------------
   // 13. ЖЕСТ ПЕРЕТАСКИВАНИЯ (PAN GESTURE)

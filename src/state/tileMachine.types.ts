@@ -1,5 +1,7 @@
 // src/state/tileMachine.types.ts
 
+import { Tile } from "../models";
+
 // ============================================================================
 // СОСТОЯНИЯ ПЛИТКИ (TILE STATES)
 // ============================================================================
@@ -69,6 +71,8 @@ export interface TileContext {
   // === Идентификаторы ===
   tileId: string;
   tileType: string;
+  
+  tile: Tile | null;
   
   // === Позиция и размер (логические значения) ===
   position: { x: number; y: number };
@@ -208,6 +212,7 @@ export interface UseTileMachineOptions {
   tileType: string;
   initialPosition: { x: number; y: number };
   spawnerPosition: { x: number; y: number; width: number; height: number };
+  tile?: Tile;
   /** Колбэк при смене логического состояния */
   onStateChange?: (state: TileState, context: TileContext) => void;
   /** Колбэк при размещении на сетке */

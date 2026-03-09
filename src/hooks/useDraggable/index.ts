@@ -4,8 +4,6 @@
 // АДАПТЕР ДЛЯ ПОСТЕПЕННОЙ МИГРАЦИИ
 // ============================================================================
 
-import { FEATURE_FLAGS } from '../../state';
-import { useDraggableLegacy } from './useDraggable.legacy';
 import { useDraggableFSM } from './useDraggable.fsm';
 
 // ============================================================================
@@ -31,23 +29,12 @@ export const useDraggable = (
   externalInitialPosition: { x: number; y: number } | null = null,
   onPlaced?: (cell: { col: number; row: number }) => void
 ): UseDraggableReturn => {
-  
-  const useFSM = FEATURE_FLAGS.USE_TILE_FSM;
-  
-  if (useFSM) {
-    return useDraggableFSM(
-      initialTileData, 
-      tileId, 
-      externalInitialPosition, 
-      onPlaced  
-    );
-  }
-  
-  return useDraggableLegacy(initialTileData, tileId, externalInitialPosition);
+  // 🔥 Всегда используем FSM — legacy удалён
+  return useDraggableFSM(initialTileData, tileId, externalInitialPosition, onPlaced);
 };
 
 // ============================================================================
 // ЭКСПОРТЫ
 // ============================================================================
-export { useDraggableLegacy, useDraggableFSM };
+export { useDraggableFSM };
 export default useDraggable;

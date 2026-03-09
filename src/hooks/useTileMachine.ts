@@ -60,6 +60,7 @@ export const useTileMachine = ({
   tileType,            // Тип плитки (для будущих расширений)
   initialPosition,     // Начальная позиция на экране {x, y}
   spawnerPosition,     // Позиция и размер спавнера {x, y, width, height}
+  tile,
   onStateChange,       // Колбэк при смене состояния (для синхронизации с родительским компонентом)
   onPlaced,            // Колбэк при успешном размещении плитки в ячейке
   onReturned,          // Колбэк при возврате плитки в спавнер
@@ -103,8 +104,9 @@ export const useTileMachine = ({
   
   if (!machineRef.current) {
     const initialContext: TileContext = {
-      tileId,
+      tileId: tile?.id || tileId,
       tileType,
+      tile: tile ?? null, 
       position: { ...initialPosition },
       size: { width: spawnerPosition.width, height: spawnerPosition.height },
       spawnerPosition: { ...spawnerPosition },
@@ -118,6 +120,19 @@ export const useTileMachine = ({
     
     machineRef.current = new TileStateMachine(initialContext);
   }
+
+  useEffect(() => {
+    if (machineRef.current && tileId) {
+      const ctx = machineRef.current.getContext();
+      // Обновляем tileId только если он действительно изменился
+      if (ctx.tileId !== tileId) {
+        ctx.tileId = tileId;
+        if (__DEV__) {
+          console.log(`[TileMachine] tileId обновлён: ${ctx.tileId}`);
+        }
+      }
+    }
+  }, [tileId]);
   
   // --------------------------------------------------------------------------
   // 4. REACT STATE ДЛЯ ТРИГГЕРА РЕ-РЕНДЕРОВ

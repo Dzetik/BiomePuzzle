@@ -32,7 +32,7 @@ export const createTileConfig = (
 // FEATURE FLAGS
 // ============================================================================
 export const FEATURE_FLAGS = {
-  USE_TILE_FSM: process.env.USE_TILE_FSM === 'true' || process.env.NODE_ENV !== 'production',
+  USE_TILE_FSM: process.env.USE_TILE_FSM === 'true',
   SHOW_TILE_DEBUG: process.env.NODE_ENV !== 'production',
   LOG_TRANSITIONS: process.env.NODE_ENV !== 'production',
 };
