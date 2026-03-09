@@ -1,14 +1,14 @@
-// src/hooks/useTileMachine.ts
+// ============================================================================
+// ХУК ИНТЕГРАЦИИ FSM С REACT
+// ============================================================================
+// Этот хук соединяет машину состояний (TileStateMachine) с экосистемой React.
+// Он управляет:
+// - Animated значениями для плавных анимаций позиции и размера
+// - Синхронизацией состояния FSM с React state для ре-рендеров
+// - Обработкой колбэков (onPlaced, onReturned, onStateChange)
+// ============================================================================
 
-// ============================================================================
-// ИМПОРТЫ
-// ============================================================================
-import { 
-  useState, 
-  useEffect, 
-  useCallback, 
-  useRef, 
-} from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { Animated } from 'react-native';
 import { TileStateMachine } from '../state/tileMachine';
 import {
@@ -23,34 +23,22 @@ import { GridService } from '../services/GridService';
 import { DEFAULT_TILE_SIZE } from '../constants/tile';
 
 // ============================================================================
-// 🔥 ГЛОБАЛЬНЫЙ REFS ДЛЯ ОТСЛЕЖИВАНИЯ ЗАВЕРШЁННЫХ АНИМАЦИЙ
+// ТИП ВОЗВРАЩАЕМОГО ЗНАЧЕНИЯ
 // ============================================================================
-// Предотвращает двойной вызов completeAnimation (из колбэка + timeout)
-const completedAnimationsRef = new Map<string, boolean>();
-
-// Очистка старых записей каждые 5 секунд
-setInterval(() => {
-  if (completedAnimationsRef.size > 50) {
-    const keys = Array.from(completedAnimationsRef.keys());
-    keys.slice(0, 25).forEach(key => completedAnimationsRef.delete(key));
-  }
-}, 5000);
-
-// ============================================================================
-// ТИПЫ ВОЗВРАЩАЕМОГО ЗНАЧЕНИЯ ХУКА
+// Интерфейс определяет что хук возвращает для использования в компонентах.
 // ============================================================================
 export interface UseTileMachineReturn {
-  state: TileState;
-  send: (event: TileEvent) => void;
-  context: TileContext | null;
-  animated: {
-    position: Animated.ValueXY;
-    size: {
+  state: TileState;  // Текущее состояние FSM (для условного рендера)
+  send: (event: TileEvent) => void;  // Функция отправки событий в FSM
+  context: TileContext | null;  // Текущий контекст (для отладки/инспекции)
+  animated: {  // Animated значения для привязки к UI
+    position: Animated.ValueXY;  // Позиция плитки на экране
+    size: {  // Размер плитки (ширина и высота)
       width: Animated.Value;
       height: Animated.Value;
     };
   };
-  debug?: {
+  debug?: {  // Отладочная информация (только если SHOW_TILE_DEBUG = true)
     history: Array<{
       fromState: TileState;
       event: string;
@@ -64,40 +52,53 @@ export interface UseTileMachineReturn {
 // ============================================================================
 // ОСНОВНОЙ ХУК
 // ============================================================================
+// Принимает конфигурацию плитки и возвращает объект для управления ею.
+// Используется внутри useDraggable.fsm.ts для каждой активной плитки.
+// ============================================================================
 export const useTileMachine = ({
-  tileId,
-  tileType,
-  initialPosition,
-  spawnerPosition,
-  onStateChange,
-  onPlaced,
-  onReturned,
+  tileId,              // Уникальный идентификатор плитки
+  tileType,            // Тип плитки (для будущих расширений)
+  initialPosition,     // Начальная позиция на экране {x, y}
+  spawnerPosition,     // Позиция и размер спавнера {x, y, width, height}
+  onStateChange,       // Колбэк при смене состояния (для синхронизации с родительским компонентом)
+  onPlaced,            // Колбэк при успешном размещении плитки в ячейке
+  onReturned,          // Колбэк при возврате плитки в спавнер
 }: UseTileMachineOptions): UseTileMachineReturn => {
   
-  // -------------------------------------------------------------------------
-  // 1. ИНИЦИАЛИЗАЦИЯ ANIMATED VALUES (только один раз)
-  // -------------------------------------------------------------------------
+  // --------------------------------------------------------------------------
+  // 1. ИНИЦИАЛИЗАЦИЯ ANIMATED VALUES (только один раз при маунте)
+  // --------------------------------------------------------------------------
+  // Ref хранит Animated значения чтобы они не пересоздавались при ре-рендерах.
+  // Это критично для производительности: пересоздание Animated.Value прервёт анимации.
+  // --------------------------------------------------------------------------
   const animatedValuesRef = useRef<{
     position: Animated.ValueXY;
     size: { width: Animated.Value; height: Animated.Value };
   } | null>(null);
   
+  // Инициализируем только если ещё не созданы (паттерн "ленивая инициализация")
   if (!animatedValuesRef.current) {
     animatedValuesRef.current = {
-      position: new Animated.ValueXY(initialPosition),
+      position: new Animated.ValueXY(initialPosition),  // Начальная позиция
       size: {
-        width: new Animated.Value(spawnerPosition.width),
-        height: new Animated.Value(spawnerPosition.height),
+        width: new Animated.Value(spawnerPosition.width),   // Начальная ширина
+        height: new Animated.Value(spawnerPosition.height), // Начальная высота
       },
     };
   }
   
-  // Ref для хранения актуальной send функции
+  // --------------------------------------------------------------------------
+  // 2. REFS ДЛЯ ДОСТУПА К ФУНКЦИЯМ ИЗ АСИНХРОННЫХ КОЛБЭКОВ
+  // --------------------------------------------------------------------------
+  // Храним актуальную send() в ref и используем её в колбэках.
+  // --------------------------------------------------------------------------
   const sendRef = useRef<(event: TileEvent) => void>(() => {});
 
-  // -------------------------------------------------------------------------
-  // 2. ИНИЦИАЛИЗАЦИЯ МАШИНЫ СОСТОЯНИЙ (только один раз)
-  // -------------------------------------------------------------------------
+  // --------------------------------------------------------------------------
+  // 3. ИНИЦИАЛИЗАЦИЯ МАШИНЫ СОСТОЯНИЙ (только один раз при маунте)
+  // --------------------------------------------------------------------------
+  // Создаём экземпляр TileStateMachine с начальным контекстом.
+  // --------------------------------------------------------------------------
   const machineRef = useRef<TileStateMachine | null>(null);
   
   if (!machineRef.current) {
@@ -118,43 +119,71 @@ export const useTileMachine = ({
     machineRef.current = new TileStateMachine(initialContext);
   }
   
-  // -------------------------------------------------------------------------
-  // 3. REACT STATE ДЛЯ ПЕРЕ-РЕНДЕРОВ (только при смене состояния)
-  // -------------------------------------------------------------------------
+  // --------------------------------------------------------------------------
+  // 4. REACT STATE ДЛЯ ТРИГГЕРА РЕ-РЕНДЕРОВ
+  // --------------------------------------------------------------------------
+  // FSM хранит состояние внутри себя, но React компоненты не знают об изменениях.
+  // currentState синхронизируется с внутренним состоянием машины и вызывает
+  // ре-рендер когда состояние меняется — это нужно для условного рендера в UI.
+  // --------------------------------------------------------------------------
   const [currentState, setCurrentState] = useState<TileState>(
-    machineRef.current.getState()
+    machineRef.current.getState()  // Начальное состояние из машины
   );
   
+  // Отладочная информация (только если включён флаг)
   const [debugInfo, setDebugInfo] = useState<{
     history: any[];
     lastAction: MachineAction | null;
   }>({ history: [], lastAction: null });
   
-  // 🔥 Счётчик незавершённых анимаций
+  // --------------------------------------------------------------------------
+  // 5. СЧЁТЧИК АКТИВНЫХ АНИМАЦИЙ
+  // --------------------------------------------------------------------------
+  // Когда плитка анимирует и позицию, и размер одновременно, нужно отправить
+  // событие ANIMATION_COMPLETE только когда ОБЕ анимации завершатся.
+  // Этот счётчик инкрементируется при старте каждой анимации и декрементируется
+  // при завершении. Когда достигает 0 — отправляем событие.
+  // --------------------------------------------------------------------------
   const animationsPendingRef = useRef(0);
   
-  // -------------------------------------------------------------------------
-  // 4. ФУНКЦИЯ ВЫПОЛНЕНИЯ ДЕЙСТВИЙ (анимации и сайд-эффекты)
-  // -------------------------------------------------------------------------
+  // --------------------------------------------------------------------------
+  // 6. ФУНКЦИЯ ВЫПОЛНЕНИЯ ДЕЙСТВИЙ (анимации и сайд-эффекты)
+  // --------------------------------------------------------------------------
+  // Принимает MachineAction из TransitionResult и выполняет соответствующее
+  // действие: мгновенное обновление позиции, анимацию, остановку или колбэк.
+  // Использует useCallback с пустым массивом зависимостей для стабильности.
+  // --------------------------------------------------------------------------
   const executeAction = useCallback((action: MachineAction) => {
     const anim = animatedValuesRef.current;
-    if (!anim) return;
+    if (!anim) return;  // Если Animated значения ещё не инициализированы — выходим
     
     switch (action.type) {
+      // --------------------------------------------------------------------
+      // ДЕЙСТВИЕ: МГНОВЕННОЕ ОБНОВЛЕНИЕ ПОЗИЦИИ
+      // --------------------------------------------------------------------
+      // Используется во время перетаскивания для максимальной отзывчивости.
+      // Не требует анимации — позиция обновляется сразу в том же тике.
+      // --------------------------------------------------------------------
       case 'UPDATE_POSITION_IMMEDIATE': {
         anim.position.setValue(action.payload);
         break;
       }
       
+      // --------------------------------------------------------------------
+      // ДЕЙСТВИЕ: АНИМАЦИЯ ПОЗИЦИИ
+      // --------------------------------------------------------------------
+      // Используется при размещении в ячейке или возврате в спавнер.
+      // Анимирует позицию к целевым координатам с плавностью ~300ms.
+      // --------------------------------------------------------------------
       case 'ANIMATE_TO_POSITION': {
         const { x, y, duration, onComplete, col, row, baseTileSize } = action.payload;
         
-        const actionId = `pos-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-        
+        // Вычисляем целевую позицию: если указаны col/row — через GridService
         let targetX = x;
         let targetY = y;
         
         if (col !== undefined && row !== undefined) {
+          // GridService вычисляет точный центр ячейки с учётом scale и offset
           const snapPos = GridService.getSnapPosition(
             col, 
             row, 
@@ -166,48 +195,50 @@ export const useTileMachine = ({
           }
         }
         
+        // Останавливаем предыдущую анимацию позиции (если была)
         anim.position.stopAnimation();
         
+        // Увеличиваем счётчик активных анимаций
         animationsPendingRef.current++;
         
-        console.log('[useTileMachine] 🎬 ANIMATE_TO_POSITION start:', { 
-          actionId,
-          animationsPending: animationsPendingRef.current,
-          target: { x: targetX, y: targetY }
-        });
-        
+        // Флаг для предотвращения двойного вызова завершения
         let animationCompleted = false;
         
+        // Функция завершения анимации
         const completeAnimation = () => {
+          // Защита от двойного вызова (колбэк + timeout)
           if (animationCompleted) return;
           animationCompleted = true;
           
+          // Уменьшаем счётчик активных анимаций
           animationsPendingRef.current--;
           
-          console.log('[useTileMachine] 🎬 ANIMATE_TO_POSITION complete:', { 
-            actionId,
-            animationsPending: animationsPendingRef.current 
-          });
-          
+          // Если все анимации завершены — отправляем событие
+          // Используем sendRef.current вместо machineRef.current.send()
+          // Причина: sendRef всегда ссылается на актуальную send() функцию
+          // которая также вызывает setCurrentState для обновления React state.
+          // Прямой вызов machineRef.current.send() обновит только FSM,
+          // но не вызовет ре-рендер компонента → плитка "зависнет" визуально.
           if (animationsPendingRef.current === 0) {
-            console.log('[useTileMachine] 📬 Sending ANIMATION_COMPLETE via sendRef');
-            // 🔥 КЛЮЧЕВОЕ: Используем sendRef.current вместо machineRef.current.send()
             sendRef.current({ type: 'ANIMATION_COMPLETE' });
           }
           
+          // Вызываем пользовательский колбэк если есть
           onComplete?.();
         };
         
+        // Запускаем анимацию позиции
         Animated.timing(anim.position, {
-          toValue: { x: targetX, y: targetY },
-          duration: duration || DEFAULT_TILE_CONFIG.animationDuration,
-          useNativeDriver: false,
-        }).start(completeAnimation);
+          toValue: { x: targetX, y: targetY },  // Целевая позиция
+          duration: duration || DEFAULT_TILE_CONFIG.animationDuration,  // ~300ms
+          useNativeDriver: false,  // false т.к. Animated.ValueXY не поддерживается
+        }).start(completeAnimation);  // Вызываем completeAnimation после завершения
         
-        // 🔥 Фолбэк таймаут
+        // Если колбэк анимации не сработал (баг React Native),
+        // завершаем анимацию вручную через таймаут.
+        // 2000ms — достаточно для любой анимации (обычно 300ms)
         setTimeout(() => {
           if (!animationCompleted) {
-            console.log('[useTileMachine] ⚠️ ANIMATE_TO_POSITION timeout fallback');
             completeAnimation();
           }
         }, 2000);
@@ -215,44 +246,41 @@ export const useTileMachine = ({
         break;
       }
       
+      // --------------------------------------------------------------------
+      // ДЕЙСТВИЕ: АНИМАЦИЯ РАЗМЕРА
+      // --------------------------------------------------------------------
+      // Используется при изменении размера плитки (спавнер ↔ ячейка).
+      // Анимирует ширину и высоту параллельно для синхронности.
+      // --------------------------------------------------------------------
       case 'ANIMATE_SIZE': {
         const { width, height, duration, onComplete } = action.payload;
         
-        const actionId = `size-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-        
+        // Останавливаем предыдущие анимации размера
         anim.size.width.stopAnimation();
         anim.size.height.stopAnimation();
         
+        // Увеличиваем счётчик активных анимаций
         animationsPendingRef.current++;
         
-        console.log('[useTileMachine] 🎬 ANIMATE_SIZE start:', { 
-          actionId,
-          animationsPending: animationsPendingRef.current,
-          target: { width, height }
-        });
-        
+        // Флаг для предотвращения двойного вызова
         let animationCompleted = false;
         
+        // Функция завершения анимации
         const completeAnimation = () => {
           if (animationCompleted) return;
           animationCompleted = true;
           
           animationsPendingRef.current--;
           
-          console.log('[useTileMachine] 🎬 ANIMATE_SIZE complete:', { 
-            actionId,
-            animationsPending: animationsPendingRef.current 
-          });
-          
+          // Отправляем событие завершения через sendRef
           if (animationsPendingRef.current === 0) {
-            console.log('[useTileMachine] 📬 Sending ANIMATION_COMPLETE via sendRef');
-            // 🔥 КЛЮЧЕВОЕ: Используем sendRef.current вместо machineRef.current.send()
             sendRef.current({ type: 'ANIMATION_COMPLETE' });
           }
           
           onComplete?.();
         };
         
+        // Запускаем параллельные анимации ширины и высоты
         Animated.parallel([
           Animated.timing(anim.size.width, {
             toValue: width,
@@ -266,10 +294,9 @@ export const useTileMachine = ({
           }),
         ]).start(completeAnimation);
         
-        // 🔥 Фолбэк таймаут
+        // 🔥 СТРАХОВКА: Таймаут на случай если колбэк не сработает
         setTimeout(() => {
           if (!animationCompleted) {
-            console.log('[useTileMachine] ⚠️ ANIMATE_SIZE timeout fallback');
             completeAnimation();
           }
         }, 2000);
@@ -277,6 +304,12 @@ export const useTileMachine = ({
         break;
       }
       
+      // --------------------------------------------------------------------
+      // ДЕЙСТВИЕ: ОСТАНОВКА ВСЕХ АНИМАЦИЙ
+      // --------------------------------------------------------------------
+      // Используется при удалении плитки или принудительной остановке.
+      // Сбрасывает счётчик анимаций в 0.
+      // --------------------------------------------------------------------
       case 'STOP_ANIMATIONS': {
         anim.position.stopAnimation();
         anim.size.width.stopAnimation();
@@ -285,92 +318,92 @@ export const useTileMachine = ({
         break;
       }
       
+      // --------------------------------------------------------------------
+      // ДЕЙСТВИЕ: ПРОИЗВОЛЬНЫЙ КОЛБЭК
+      // --------------------------------------------------------------------
+      // Используется для расширений (например, освобождение ячейки в сетке).
+      // --------------------------------------------------------------------
       case 'CALLBACK': {
         action.payload();
         break;
       }
-      
-      // 🔥 НОВОЕ: Обработка отложенного завершения (если используете)
-      case 'DELAYED_ANIMATION_COMPLETE': {
-        const delay = action.payload?.delay || 350;
-        console.log('[useTileMachine] ⏱️ Scheduling DELAYED_ANIMATION_COMPLETE in', delay, 'ms');
-        setTimeout(() => {
-          console.log('[useTileMachine] 📬 Sending DELAYED_ANIMATION_COMPLETE via sendRef');
-          sendRef.current({ type: 'DELAYED_ANIMATION_COMPLETE' });
-        }, delay);
-        break;
-      }
     }
     
+    // Обновляем отладочную информацию если включён флаг
     if (FEATURE_FLAGS.SHOW_TILE_DEBUG) {
       setDebugInfo(prev => ({ ...prev, lastAction: action }));
     }
-  }, []);
+  }, []);  // Пустой массив зависимостей — executeAction не пересоздаётся
   
-  // ============================================================================
-  // 5. ФУНКЦИЯ ОТПРАВКИ СОБЫТИЙ (С ОТЛАДКОЙ)
-  // ============================================================================
+  // --------------------------------------------------------------------------
+  // 7. ФУНКЦИЯ ОТПРАВКИ СОБЫТИЙ (ГЛАВНАЯ ТОЧКА ВХОДА)
+  // --------------------------------------------------------------------------
+  // Единственный способ изменить состояние FSM извне.
+  // Вызывается из жестов (onStart, onUpdate, onEnd) и анимационных колбэков.
+  // --------------------------------------------------------------------------
   const send = useCallback((event: TileEvent) => {
+    // Проверяем что машина состояний инициализирована
     if (!machineRef.current) return;
     
-    // 🔥 Отладка входа
-    console.log('[useTileMachine] 📥 send() called:', {
-      eventType: event.type,
-      tileId: machineRef.current.getContext()?.tileId,
-    });
-    
+    // Получаем состояние ДО обработки события (для сравнения)
     const machineStateBefore = machineRef.current.getState();
+    
+    // Отправляем событие в машину состояний
     const result = machineRef.current.send(event);
-    const machineStateAfter = result?.nextState;
     
-    console.log('[useTileMachine] 🔍 machineState BEFORE:', machineStateBefore);
-    console.log('[useTileMachine] 🔍 machineState AFTER:', machineStateAfter);
+    // Если переход не найден — выходим (событие проигнорировано)
+    if (!result) return;
     
-    if (!result) {
-      console.log('[useTileMachine] ⚠️ No transition for event:', event.type);
-      return;
-    }
-    
+    // Проверяем изменилось ли состояние
     const stateChanged = result.nextState !== machineStateBefore;
     
-    console.log('[useTileMachine] 🔄 stateChanged check:', {
-      prevState: machineStateBefore,
-      nextState: result.nextState,
-      willCallSetState: stateChanged,
-    });
-    
+    // Если состояние изменилось — обновляем React state и вызываем колбэки
     if (stateChanged) {
-      console.log('[useTileMachine] ✅ State CHANGED — calling setCurrentState');
+      // Обновляем React state — это вызывает ре-рендер компонента
       setCurrentState(result.nextState);
       
-      // 🔥 Обработка размещения
+      // ------------------------------------------------------------------
+      // КОЛБЭК: РАЗМЕЩЕНИЕ ПЛИТКИ
+      // ------------------------------------------------------------------
+      // Вызывается когда плитка успешно размещена в ячейке.
+      // Добавляет плитку в TilesContext для сохранения в сетке.
+      // ------------------------------------------------------------------
       if (result.nextState === 'PLACED' && onPlaced) {
         const ctx = machineRef.current?.getContext();
         if (ctx?.targetCell) {
+          // Занимаем ячейку через GridService (для проверки занятости)
           GridService.occupyCell(ctx.targetCell.col, ctx.targetCell.row, ctx.tileId);
+          // Вызываем внешний колбэк (в App.js создаётся новая плитка в спавнере)
           onPlaced(ctx.targetCell);
         }
       }
       
-      // 🔥 Обработка возврата в спавнер
+      // ------------------------------------------------------------------
+      // КОЛБЭК: ВОЗВРАТ В СПАВНЕР
+      // ------------------------------------------------------------------
+      // Вызывается когда плитка вернулась в спавнер после неудачного размещения.
+      // ------------------------------------------------------------------
       if (result.nextState === 'SPAWNER_IDLE' && onReturned) {
         onReturned();
       }
       
-      // 🔥 Общий колбэк
+      // ------------------------------------------------------------------
+      // КОЛБЭК: СМЕНА СОСТОЯНИЯ (ОБЩИЙ)
+      // ------------------------------------------------------------------
+      // Вызывается при любом изменении состояния (для синхронизации с родителем).
+      // ------------------------------------------------------------------
       if (onStateChange) {
         const ctx = machineRef.current?.getContext();
         if (ctx) {
           onStateChange(result.nextState, ctx);
         }
       }
-    } else {
-      console.log('[useTileMachine] ⚠️ State UNCHANGED — skipping setCurrentState');
     }
     
-    // 🔥 Выполняем действия
+    // Выполняем все действия из перехода (анимации)
     result.actions.forEach(action => executeAction(action));
     
+    // Обновляем отладочную информацию если включён флаг
     if (FEATURE_FLAGS.SHOW_TILE_DEBUG) {
       setDebugInfo({
         history: machineRef.current?.getHistory() || [],
@@ -378,50 +411,64 @@ export const useTileMachine = ({
       });
     }
     
-    console.log('[useTileMachine] 📤 send() completed');
-    
-  }, [executeAction, onPlaced, onReturned, onStateChange]);  // ← executeAction в зависимостях!
+  }, [executeAction, onPlaced, onReturned, onStateChange]);  // Зависимости для стабильности
 
-  // 🔥 Обновляем sendRef после создания send
+  // --------------------------------------------------------------------------
+  // 8. СИНХРОНИЗАЦИЯ sendRef
+  // --------------------------------------------------------------------------
+  // Обновляет sendRef.current при каждом изменении send функции.
+  // Это гарантирует что анимационные колбэки всегда вызывают актуальную send().
+  // --------------------------------------------------------------------------
   useEffect(() => {
     sendRef.current = send;
   }, [send]);
 
-  // 🔥 КРИТИЧНО: Синхронизация состояния с родителем
+  // --------------------------------------------------------------------------
+  // 9. СИНХРОНИЗАЦИЯ СОСТОЯНИЯ С РОДИТЕЛЕМ
+  // --------------------------------------------------------------------------
+  // Дополнительный useEffect для гарантии что onStateChange вызывается
+  // даже если send() не был вызван напрямую (например, при маунте).
+  // --------------------------------------------------------------------------
   useEffect(() => {
-    console.log('[useTileMachine] 📢 currentState changed:', currentState);
-    
-    // 🔥 Форсируем уведомление родителя через onStateChange
     if (onStateChange && machineRef.current) {
-      const ctx = machineRef.current.getContext();  
+      const ctx = machineRef.current.getContext();
       if (ctx) {
         onStateChange(currentState, ctx);
       }
     }
   }, [currentState, onStateChange]);
   
-  // -------------------------------------------------------------------------
-  // 6. ПОДПИСКА НА ИЗМЕНЕНИЯ ПОЗИЦИИ
-  // -------------------------------------------------------------------------
+  // --------------------------------------------------------------------------
+  // 10. ПОДПИСКА НА ИЗМЕНЕНИЯ ПОЗИЦИИ
+  // --------------------------------------------------------------------------
+  // Синхронизирует Animated.ValueXY с контекстом машины состояний.
+  // Нужно чтобы контекст всегда содержал актуальную позицию плитки.
+  // --------------------------------------------------------------------------
   useEffect(() => {
     const anim = animatedValuesRef.current?.position;
     if (!anim) return;
     
+    // Добавляем слушатель изменений позиции
     const listenerId = anim.addListener((value) => {
       const ctx = machineRef.current?.getContext();
       if (ctx) {
+        // Обновляем позицию в контексте (для отладки и логики)
         ctx.position = { x: value.x || 0, y: value.y || 0 };
       }
     });
     
+    // Очищаем слушатель при размонтировании
     return () => {
       anim.removeListener(listenerId);
     };
   }, []);
   
-  // -------------------------------------------------------------------------
-  // 7. ОЧИСТКА ПРИ РАЗМОНТИРОВАНИИ
-  // -------------------------------------------------------------------------
+  // --------------------------------------------------------------------------
+  // 11. ОЧИСТКА ПРИ РАЗМОНТИРОВАНИИ
+  // --------------------------------------------------------------------------
+  // Останавливает все анимации и освобождает ссылки при размонтировании.
+  // Предотвращает утечки памяти и ошибки "can't perform update on unmounted component".
+  // --------------------------------------------------------------------------
   useEffect(() => {
     return () => {
       const anim = animatedValuesRef.current;
@@ -434,17 +481,20 @@ export const useTileMachine = ({
     };
   }, []);
   
-  // -------------------------------------------------------------------------
-  // 8. ФОРМИРОВАНИЕ ВОЗВРАЩАЕМОГО ЗНАЧЕНИЯ
-  // -------------------------------------------------------------------------
+  // --------------------------------------------------------------------------
+  // 12. ФОРМИРОВАНИЕ ВОЗВРАЩАЕМОГО ЗНАЧЕНИЯ
+  // --------------------------------------------------------------------------
+  // Объект который используется в useDraggable.fsm.ts для управления плиткой.
+  // --------------------------------------------------------------------------
   return {
-    state: currentState,
-    send,
-    context: machineRef.current?.getContext() || null,
+    state: currentState,  // Текущее состояние FSM (для условного рендера)
+    send,                 // Функция отправки событий (для жестов)
+    context: machineRef.current?.getContext() || null,  // Контекст для отладки
     animated: {
-      position: animatedValuesRef.current!.position,
-      size: animatedValuesRef.current!.size,
+      position: animatedValuesRef.current!.position,  // Animated позиция
+      size: animatedValuesRef.current!.size,          // Animated размер
     },
+    // Отладочная информация — только если включён флаг (не в продакшене)
     ...(FEATURE_FLAGS.SHOW_TILE_DEBUG && {
       debug: debugInfo,
     }),

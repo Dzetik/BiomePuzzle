@@ -23,6 +23,3 @@ export {
 } from './tileMachine.config';
 
 export { TileStateMachine } from './tileMachine';
-
-//export { useTileMachine } from '../hooks/useTileMachine';
-//export type { UseTileMachineReturn } from '../hooks/useTileMachine';

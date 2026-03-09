@@ -1,8 +1,11 @@
-// src/state/tileMachine.ts
+// ============================================================================
+// МАШИНА СОСТОЯНИЙ ПЛИТКИ (FSM)
+// ============================================================================
+// Этот класс реализует конечный автомат для управления жизненным циклом плитки.
+// Все переходы между состояниями строго типизированы и детерминированы.
+// Класс не зависит от React — может использоваться в любом контексте.
+// ============================================================================
 
-// ============================================================================
-// ИМПОРТЫ
-// ============================================================================
 import {
   TileState,
   TileEvent,
@@ -17,8 +20,14 @@ import { DEFAULT_TILE_SIZE } from '../constants/tile';
 // КЛАСС МАШИНЫ СОСТОЯНИЙ
 // ============================================================================
 export class TileStateMachine {
+  // Контекст хранит все данные плитки: позицию, размер, привязку к ячейке
   private context: TileContext;
+  
+  // Текущее состояние автомата — изменяется только через send()
   private currentState: TileState;
+  
+  // История переходов — для отладки и потенциального восстановления состояния
+  // Хранит не более 50 записей чтобы не занимать память
   private history: Array<{
     fromState: TileState;
     event: TileEvent['type'];
@@ -29,10 +38,15 @@ export class TileStateMachine {
   // ============================================================================
   // КОНСТРУКТОР
   // ============================================================================
+  // Инициализирует машину с начальным контекстом.
+  // Начальное состояние определяется по флагу isInSpawner.
+  // ============================================================================
   constructor(initialContext: TileContext) {
     this.context = initialContext;
+    // 🔥 Определяем начальное состояние: если плитка в спавнере — ждёт драга
     this.currentState = initialContext.isInSpawner ? 'SPAWNER_IDLE' : 'DRAGGING';
     
+    // Логирование только в режиме разработки
     if (FEATURE_FLAGS.LOG_TRANSITIONS) {
       console.log(`[FSM:${initialContext.tileId}] Initialized in ${this.currentState}`);
     }
@@ -41,13 +55,17 @@ export class TileStateMachine {
   // ============================================================================
   // ГЛАВНЫЙ МЕТОД: ОТПРАВКА СОБЫТИЯ
   // ============================================================================
+  // Единственный публичный способ изменить состояние машины.
+  // Все события проходят через этот метод — это гарантирует предсказуемость.
+  // ============================================================================
   public send(event: TileEvent): TransitionResult | null {
-    // 🔥 СОХРАНЯЕМ состояние ДО изменений
+    // 🔥 Сохраняем состояние ДО обработки — нужно для сравнения и отладки
     const prevState = this.currentState;
     
-    // Получаем переход
+    // Получаем переход на основе текущего состояния и события
     const transition = this.getTransition(prevState, event);
     
+    // Если переход не найден — событие игнорируется (невалидная комбинация state/event)
     if (!transition) {
       if (FEATURE_FLAGS.LOG_TRANSITIONS) {
         console.warn(
@@ -57,16 +75,17 @@ export class TileStateMachine {
       return null;
     }
     
-    // Обновляем состояние
+    // Обновляем текущее состояние на новое из перехода
     this.currentState = transition.nextState;
     
-    // Применяем обновления контекста
+    // Обновляем контекст: старые данные + новые из contextUpdates
+    // Spread-оператор гарантирует что не указанные поля сохранятся
     this.context = { ...this.context, ...transition.contextUpdates };
     
-    // Записываем в историю
+    // Записываем переход в историю (для отладки)
     this.addToHistory(prevState, event.type, transition.nextState);
     
-    // Логирование
+    // Логирование перехода (только в режиме разработки)
     if (FEATURE_FLAGS.LOG_TRANSITIONS) {
       console.log(
         `[FSM:${this.context.tileId}] ${prevState} --[${event.type}]--> ${transition.nextState}`,
@@ -74,30 +93,30 @@ export class TileStateMachine {
       );
     }
     
-    // 🔥 ВОЗВРАЩАЕМ prevState вместе с результатом
+    // Возвращаем prevState вместе с результатом
+    // Это нужно хуку useTileMachine чтобы определить изменилось ли состояние
+    // и нужно ли вызывать setCurrentState для ре-рендера React-компонента
     return {
       ...transition,
-      prevState,  // ← Добавьте это!
+      prevState,
     };
   }
 
   // ============================================================================
-  // ПОЛУЧЕНИЕ ТЕКУЩЕГО СОСТОЯНИЯ
+  // ГЕТТЕРЫ (Публичный API)
   // ============================================================================
+  // Эти методы используются внешним кодом для получения информации о машине.
+  // ============================================================================
+
   public getState(): TileState {
     return this.currentState;
   }
 
-  // ============================================================================
-  // ПОЛУЧЕНИЕ КОНТЕКСТА
-  // ============================================================================
   public getContext(): TileContext {
     return this.context;
   }
 
-  // ============================================================================
-  // ПОЛУЧЕНИЕ ИСТОРИИ (для отладки)
-  // ============================================================================
+  // Возвращает копию истории чтобы внешний код не мог её изменить
   public getHistory() {
     return [...this.history];
   }
@@ -105,51 +124,36 @@ export class TileStateMachine {
   // ============================================================================
   // ТАБЛИЦА ПЕРЕХОДОВ (TRANSITION MATRIX)
   // ============================================================================
+  // Маршрутизирует событие к соответствующему обработчику состояния.
+  // Каждый state имеет свой метод handleXxx — это упрощает тестирование.
+  // ============================================================================
   private getTransition(state: TileState, event: TileEvent): TransitionResult | null {
     switch (state) {
-      // -------------------------------------------------------------------------
-      // SPAWNER_IDLE
-      // -------------------------------------------------------------------------
       case 'SPAWNER_IDLE':
         return this.handleSpawnerIdle(event);
       
-      // -------------------------------------------------------------------------
-      // DRAGGING
-      // -------------------------------------------------------------------------
       case 'DRAGGING':
         return this.handleDragging(event);
       
-      // -------------------------------------------------------------------------
-      // SNAPPING
-      // -------------------------------------------------------------------------
       case 'SNAPPING':
         return this.handleSnapping(event);
       
-      // -------------------------------------------------------------------------
-      // PLACED
-      // -------------------------------------------------------------------------
       case 'PLACED':
         return this.handlePlaced(event);
       
-      // -------------------------------------------------------------------------
-      // RETURNING_TO_SPAWN
-      // -------------------------------------------------------------------------
       case 'RETURNING_TO_SPAWN':
         return this.handleReturningToSpawn(event);
       
-      // -------------------------------------------------------------------------
-      // REMOVED (терминальное состояние)
-      // -------------------------------------------------------------------------
+      // Терминальное состояние — плитка удалена, переходы невозможны
       case 'REMOVED':
         return null;
       
-      // -------------------------------------------------------------------------
-      // SPAWNER_RETURNING (промежуточное)
-      // -------------------------------------------------------------------------
+      // Промежуточное состояние — делегируем основному обработчику
       case 'SPAWNER_RETURNING':
         return this.handleSpawnerReturning(event);
       
       default:
+        // Неизвестное состояние — игнорируем событие для безопасности
         return null;
     }
   }
@@ -157,18 +161,26 @@ export class TileStateMachine {
   // ============================================================================
   // ОБРАБОТЧИКИ СОСТОЯНИЙ
   // ============================================================================
+  // Каждый метод обрабатывает события только для своего состояния.
+  // Возвращает TransitionResult или null если событие неприменимо.
+  // ============================================================================
 
+  // -------------------------------------------------------------------------
+  // SPAWNER_IDLE: Плитка в спавнере, готова к перетаскиванию
+  // -------------------------------------------------------------------------
   private handleSpawnerIdle(event: TileEvent): TransitionResult | null {
     switch (event.type) {
+      // Пользователь начал перетаскивание
       case 'TAKEN_FROM_SPAWN':
         return {
           nextState: 'DRAGGING',
           contextUpdates: {
-            isInSpawner: false,
-            currentCell: undefined,
-            isAnimating: false,
+            isInSpawner: false,      // Плитка больше не в спавнере
+            currentCell: undefined,  // Очищаем привязку к ячейке
+            isAnimating: false,      // Анимация не требуется
           },
           actions: [
+            // Мгновенно обновляем позицию для отзывчивости во время драга
             {
               type: 'UPDATE_POSITION_IMMEDIATE',
               payload: { ...this.context.position },
@@ -177,6 +189,7 @@ export class TileStateMachine {
           logMessage: 'Tile taken from spawner',
         };
       
+      // Принудительное удаление плитки
       case 'REMOVE':
         return {
           nextState: 'REMOVED',
@@ -185,20 +198,26 @@ export class TileStateMachine {
           logMessage: 'Tile removed from spawner',
         };
       
+      // Другие события игнорируются в этом состоянии
       default:
         return null;
     }
   }
 
+  // -------------------------------------------------------------------------
+  // DRAGGING: Плитка перетаскивается пользователем
+  // -------------------------------------------------------------------------
   private handleDragging(event: TileEvent): TransitionResult | null {
     switch (event.type) {
+      // Пользователь перемещает плитку (~60 раз в секунду)
       case 'DRAG_MOVE':
         return {
-          nextState: 'DRAGGING',
+          nextState: 'DRAGGING',  // Остаёмся в том же состоянии
           contextUpdates: {
-            position: event.payload,
+            position: event.payload,  // Обновляем позицию на новые координаты
           },
           actions: [
+            // Мгновенное обновление позиции без анимации для максимальной отзывчивости
             {
               type: 'UPDATE_POSITION_IMMEDIATE',
               payload: event.payload,
@@ -207,19 +226,22 @@ export class TileStateMachine {
           logMessage: `Dragging to (${event.payload.x}, ${event.payload.y})`,
         };
       
+      // Пользователь отпустил плитку — начинаем поиск ячейки
       case 'DRAG_END':
         return {
-          nextState: 'SNAPPING',
+          nextState: 'SNAPPING',  // Переходим в состояние поиска
           contextUpdates: {
-            isAnimating: true,
+            isAnimating: true,  // Включаем флаг анимации
           },
-          actions: [],
+          actions: [],  // Действия будут в handleSnapping
           logMessage: 'Drag ended, searching for cell',
         };
       
+      // Принудительный возврат в спавнер (например, по таймауту)
       case 'RETURN_TO_SPAWN':
         return this.createReturnToSpawnerTransition('Manual return from drag');
       
+      // Удаление плитки во время драга
       case 'REMOVE':
         return {
           nextState: 'REMOVED',
@@ -233,9 +255,14 @@ export class TileStateMachine {
     }
   }
 
+  // -------------------------------------------------------------------------
+  // SNAPPING: Поиск ячейки после окончания перетаскивания
+  // -------------------------------------------------------------------------
   private handleSnapping(event: TileEvent): TransitionResult | null {
     switch (event.type) {
+      // Найдена ячейка под плиткой
       case 'CELL_FOUND':
+        // Проверяем свободна ли ячейка
         if (event.payload.isFree) {
           const scale = event.payload.scale ?? 1;
           const baseSize = event.payload.baseTileSize ?? DEFAULT_TILE_SIZE.width;
@@ -249,21 +276,23 @@ export class TileStateMachine {
               isInSpawner: false,
             },
             actions: [
+              // Анимируем позицию к центру найденной ячейки
               {
                 type: 'ANIMATE_TO_POSITION',
                 payload: {
                   col: event.payload.col,
                   row: event.payload.row,
-                  x: 0,
+                  x: 0,  // x/y не нужны если указаны col/row
                   y: 0,
                   duration: DEFAULT_TILE_CONFIG.animationDuration,
-                  baseTileSize: baseSize, 
+                  baseTileSize: baseSize,  // Для расчёта позиции через GridService
                 },
               },
+              // Анимируем размер к размеру ячейки с учётом текущего scale
               {
                 type: 'ANIMATE_SIZE',
                 payload: {
-                  width: baseSize * scale,  // 🔥 Базовый размер * scale
+                  width: baseSize * scale,  // 🔥 Базовый размер * масштаб
                   height: baseSize * scale,
                   duration: DEFAULT_TILE_CONFIG.animationDuration,
                 },
@@ -272,14 +301,17 @@ export class TileStateMachine {
             logMessage: `Snapped to cell (${event.payload.col}, ${event.payload.row})`,
           };
         } else {
+          // Ячейка занята — возвращаем в спавнер
           return this.createReturnToSpawnerTransition('Cell occupied');
         }
       
+      // Ячейка не найдена — возвращаем в спавнер
       case 'NO_CELL':
         return this.createReturnToSpawnerTransition('No cell found');
       
+      // Fallback: если анимация завершилась без явного CELL_FOUND
+      // Это страховка на случай если событие потерялось
       case 'ANIMATION_COMPLETE':
-        // Fallback: если анимация завершилась без явного CELL_FOUND
         return {
           nextState: 'SPAWNER_IDLE',
           contextUpdates: {
@@ -290,6 +322,7 @@ export class TileStateMachine {
           logMessage: 'Snap animation completed, returned to spawner',
         };
       
+      // Удаление плитки во время поиска ячейки
       case 'REMOVE':
         return {
           nextState: 'REMOVED',
@@ -303,17 +336,22 @@ export class TileStateMachine {
     }
   }
 
+  // -------------------------------------------------------------------------
+  // PLACED: Плитка успешно размещена в ячейке
+  // -------------------------------------------------------------------------
   private handlePlaced(event: TileEvent): TransitionResult | null {
     switch (event.type) {
+      // Возврат размещённой плитки в спавнер (например, по действию пользователя)
       case 'RETURN_TO_SPAWN':
         return {
           nextState: 'RETURNING_TO_SPAWN',
           contextUpdates: {
-            currentCell: undefined,
+            currentCell: undefined,  // Очищаем привязку к ячейке
             isAnimating: true,
-            targetPosition: this.context.spawnerPosition,
+            targetPosition: this.context.spawnerPosition,  // Целевая позиция
           },
           actions: [
+            // Анимируем позицию обратно в спавнер
             {
               type: 'ANIMATE_TO_POSITION',
               payload: {
@@ -322,6 +360,7 @@ export class TileStateMachine {
                 duration: DEFAULT_TILE_CONFIG.animationDuration,
               },
             },
+            // Освобождаем ячейку в сетке после начала анимации
             {
               type: 'CALLBACK',
               payload: () => this.releaseCell(),
@@ -330,7 +369,7 @@ export class TileStateMachine {
           logMessage: 'Returning placed tile to spawner',
         };
 
-      // 🔥 НОВОЕ: Явный сброс после возврата (для повторной активации)
+      // Явный сброс после возврата (для повторной активации плитки)
       case 'RETURNED_TO_SPAWNER':
         return {
           nextState: 'SPAWNER_IDLE',
@@ -341,10 +380,12 @@ export class TileStateMachine {
             targetCell: undefined,
           },
           actions: [
+            // Мгновенно перемещаем в позицию спавнера
             {
               type: 'UPDATE_POSITION_IMMEDIATE',
               payload: { ...this.context.spawnerPosition },
             },
+            // Анимируем размер к размеру спавнера
             {
               type: 'ANIMATE_SIZE',
               payload: {
@@ -357,25 +398,28 @@ export class TileStateMachine {
           logMessage: 'Returned to spawner (failed placement), ready for drag',
         };  
       
+      // Удаление плитки из сетки
       case 'REMOVE':
         return {
           nextState: 'REMOVED',
           contextUpdates: { currentCell: undefined },
           actions: [
+            // Освобождаем ячейку перед удалением
             { type: 'CALLBACK', payload: () => this.releaseCell() },
           ],
           logMessage: 'Tile removed from grid',
         };
       
-      // 🔥 Игнорируем ANIMATION_COMPLETE в PLACED (анимация уже завершена)
+      // Анимация размещения завершена — просто снимаем флаг
       case 'ANIMATION_COMPLETE':
         return {
-          nextState: 'PLACED',
-          contextUpdates: { isAnimating: false },
+          nextState: 'PLACED',  // Остаёмся в том же состоянии
+          contextUpdates: { isAnimating: false },  // Только снимаем флаг
           actions: [],
           logMessage: 'Placement animation completed',
         };
 
+      // Сброс в спавнер для новой плитки (после размещения предыдущей)
       case 'RESET_TO_SPAWNER':
         return {
           nextState: 'SPAWNER_IDLE',
@@ -386,12 +430,12 @@ export class TileStateMachine {
             targetCell: undefined,
           },
           actions: [
-            // 🔥 Позиция: мгновенно в центр спавнера
+            // Мгновенно перемещаем в позицию спавнера
             {
               type: 'UPDATE_POSITION_IMMEDIATE',
               payload: { ...this.context.spawnerPosition },
             },
-            // 🔥 НОВОЕ: Размер: анимация до размера спавнера
+            // Анимируем размер к размеру спавнера
             {
               type: 'ANIMATE_SIZE',
               payload: {
@@ -409,22 +453,12 @@ export class TileStateMachine {
     }
   }
 
+  // -------------------------------------------------------------------------
+  // RETURNING_TO_SPAWN: Плитка возвращается в спавнер
+  // -------------------------------------------------------------------------
   private handleReturningToSpawn(event: TileEvent): TransitionResult | null {
     switch (event.type) {
-      case 'DELAYED_ANIMATION_COMPLETE':
-      // 🔥 Переход в SPAWNER_IDLE после задержки
-      return {
-        nextState: 'SPAWNER_IDLE',
-        contextUpdates: {
-          isInSpawner: true,
-          isAnimating: false,
-          currentCell: undefined,
-          targetCell: undefined,
-        },
-        actions: [],
-        logMessage: 'Returned to spawner after delay',
-      };
-
+      // Анимация возврата завершена — плитка готова к новому драгу
       case 'ANIMATION_COMPLETE':
         return {
           nextState: 'SPAWNER_IDLE',
@@ -434,20 +468,21 @@ export class TileStateMachine {
             currentCell: undefined,
             targetCell: undefined,
           },
-          actions: [],  // ← Пустой массив!
+          actions: [],  // Нет действий — анимация уже завершена
           logMessage: 'Returned to spawner, now idle',
         };
       
-      // 🔥 НОВОЕ: Отправляем ANIMATION_COMPLETE автоматически через 300ms
+      // Возврат из-за занятой ячейки или отсутствия ячейки
       case 'NO_CELL':
         return {
-          nextState: 'RETURNING_TO_SPAWN',
+          nextState: 'RETURNING_TO_SPAWN',  // Остаёмся в состоянии возврата
           contextUpdates: {
             currentCell: undefined,
             isAnimating: true,
             targetPosition: this.context.spawnerPosition,
           },
           actions: [
+            // Анимируем позицию обратно в спавнер
             {
               type: 'ANIMATE_TO_POSITION',
               payload: {
@@ -456,6 +491,7 @@ export class TileStateMachine {
                 duration: DEFAULT_TILE_CONFIG.animationDuration,
               },
             },
+            // Анимируем размер к размеру спавнера
             {
               type: 'ANIMATE_SIZE',
               payload: {
@@ -464,17 +500,11 @@ export class TileStateMachine {
                 duration: DEFAULT_TILE_CONFIG.animationDuration,
               },
             },
-            // 🔥 Автоматически отправляем ANIMATION_COMPLETE через 300ms
-            {
-              type: 'DELAYED_ANIMATION_COMPLETE',
-              payload: { 
-                delay: (DEFAULT_TILE_CONFIG.animationDuration || 300) + 50 
-              },
-            },
           ],
           logMessage: 'Returning to spawner: No cell found',
         };
       
+      // Удаление плитки во время возврата
       case 'REMOVE':
         return {
           nextState: 'REMOVED',
@@ -488,8 +518,12 @@ export class TileStateMachine {
     }
   }
 
+  // -------------------------------------------------------------------------
+  // SPAWNER_RETURNING: Промежуточное состояние возврата
+  // -------------------------------------------------------------------------
+  // Делегирует обработку основному методу чтобы избежать дублирования кода.
+  // -------------------------------------------------------------------------
   private handleSpawnerReturning(event: TileEvent): TransitionResult | null {
-    // Промежуточное состояние, обычно переходит в SPAWNER_IDLE
     return this.handleReturningToSpawn(event);
   }
 
@@ -497,6 +531,8 @@ export class TileStateMachine {
   // ВСПОМОГАТЕЛЬНЫЕ МЕТОДЫ
   // ============================================================================
 
+  // Создаёт стандартный переход для возврата в спавнер
+  // Выносится в отдельный метод чтобы избежать дублирования кода в handleDragging/handleSnapping
   private createReturnToSpawnerTransition(reason: string): TransitionResult {
     return {
       nextState: 'RETURNING_TO_SPAWN',
@@ -519,13 +555,16 @@ export class TileStateMachine {
     };
   }
 
+  // Освобождает ячейку в сетке при удалении или возврате плитки
+  // Вынесено в отдельный метод для централизации логики освобождения
   private releaseCell() {
     if (FEATURE_FLAGS.LOG_TRANSITIONS) {
       console.log(`[FSM:${this.context.tileId}] Cell released`);
     }
-    // Здесь можно вызвать колбэк для освобождения ячейки в сетке
+    // Здесь можно добавить вызов GridService.releaseCell() если нужно
   }
 
+  // Добавляет запись о переходе в историю с ограничением размера
   private addToHistory(from: TileState, event: string, to: TileState) {
     this.history.push({
       fromState: from,
@@ -534,10 +573,10 @@ export class TileStateMachine {
       timestamp: Date.now(),
     });
     
-    // Ограничиваем историю
-    const limit = DEFAULT_TILE_CONFIG.logHistoryLimit;
+    // Ограничиваем историю чтобы не занимала много памяти
+    const limit = DEFAULT_TILE_CONFIG.logHistoryLimit ?? 50;
     if (this.history.length > limit) {
-      this.history.shift();
+      this.history.shift();  // Удаляем самую старую запись
     }
   }
 }
