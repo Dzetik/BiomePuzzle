@@ -61,7 +61,9 @@ export type TileEvent =
   | { type: 'DELAYED_ANIMATION_COMPLETE' }
   
   // Анимация завершена (внутреннее событие)
-  | { type: 'ANIMATION_COMPLETE' };
+  | { type: 'ANIMATION_COMPLETE' }
+
+  | { type: 'ROTATE' }; 
   
 
 // ============================================================================
@@ -144,7 +146,8 @@ export type MachineAction =
   | { 
       type: 'DELAYED_ANIMATION_COMPLETE'; 
       payload: { delay: number }  // ← Правильный тип!
-    };
+    }
+  | { type: 'ROTATE_TILE' };
 
 // ============================================================================
 // РЕЗУЛЬТАТ ПЕРЕХОДА (TRANSITION RESULT)

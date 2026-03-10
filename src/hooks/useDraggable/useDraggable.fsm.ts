@@ -205,9 +205,6 @@ export const useDraggableFSM = (
       stableTileId.current = spawnerTile.id;
       prevSpawnerTileIdRef.current = spawnerTile.id;
       forceUpdate();
-      if (__DEV__) {
-        console.log(`[Draggable] FSM сброшен для новой плитки: ${spawnerTile.id}`);
-      }
     }
   }, [spawnerTile?.id, stableInitialPosition, send]);
 
@@ -396,6 +393,32 @@ export const useDraggableFSM = (
       dragStartRef.current = null;
     });
 
+  // ============================================================================
+  // 13.1. ЖЕСТ ТАПА (ДЛЯ ПОВОРОТА)
+  // ============================================================================
+  // Срабатывает только в спавнере. Отправляет событие ROTATE в FSM.
+  // ============================================================================
+  const tapGesture = Gesture.Tap()
+    .enabled(state === 'SPAWNER_IDLE')
+    .maxDuration(250)
+    .maxDistance(10)
+    .onStart(() => {
+      send({ type: 'ROTATE' });
+      forceUpdate();
+      
+      if (__DEV__) {
+        console.log(`[Draggable] 🔄 ROTATE event sent`);
+      }
+    });
+
+  // ============================================================================
+  // 13.2. ОБЪЕДИНЯЕМ ЖЕСТЫ (Simultaneous)
+  // ============================================================================
+  // Pan имеет приоритет: если пользователь начал тащить — сработает он.
+  // Если просто тапнул — сработает tapGesture.
+  // ============================================================================
+  const composedGesture = Gesture.Simultaneous(panGesture, tapGesture);
+
   // --------------------------------------------------------------------------
   // 14. ВСПОМОГАТЕЛЬНАЯ ФУНКЦИЯ: ПОЛУЧЕНИЕ ЗНАЧЕНИЯ ANIMATED
   // --------------------------------------------------------------------------
@@ -417,14 +440,21 @@ export const useDraggableFSM = (
   // Объект который используется в App.js для рендера плитки и жестов.
   // --------------------------------------------------------------------------
   return {
-    position: { ...positionRef.current },  // Текущая позиция для рендера
-    width: getAnimatedValue(animated?.size?.width, tileSize),  // Текущая ширина
-    height: getAnimatedValue(animated?.size?.height, tileSize),  // Текущая высота
-    panHandlers: panGesture,  // Обработчик жестов для GestureDetector
-    isInSpawner: state === 'SPAWNER_IDLE' || state === 'RETURNING_TO_SPAWN',  // Флаг для UI
-    state,  // Текущее состояние FSM (для условного рендера)
-    send,  // Функция отправки событий (для отладки)
-    debug: context ? {  // Отладочная информация
+    position: { ...positionRef.current },
+    width: getAnimatedValue(animated?.size?.width, tileSize),
+    height: getAnimatedValue(animated?.size?.height, tileSize),
+    
+    // ← НОВОЕ: составной жест вместо panHandlers
+    gesture: composedGesture,
+    
+    isInSpawner: state === 'SPAWNER_IDLE' || state === 'RETURNING_TO_SPAWN',
+    state,
+    send,
+    
+    // ← НОВОЕ: текущий угол поворота для визуала
+    rotation: context?.tile?.rotation ?? 0,
+    
+    debug: context ? {
       isInSpawner: context.isInSpawner,
       currentCell: context.currentCell,
       position: context.position,

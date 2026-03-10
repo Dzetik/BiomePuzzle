@@ -1,49 +1,60 @@
-// src/components/TileView.js
-
+// src/components/TileView.tsx
 import React from 'react';
 import { Animated, Image, View, Text, StyleSheet } from 'react-native';
 import { useGrid } from '../context/GridContext';
 import { useZoom } from '../hooks/useZoom';
 
-const TileView = ({ 
+interface TileViewProps {
+  textureSource: any;
+  position: { x: number; y: number };
+  width: number;
+  height: number;
+  gesture?: any;  // ← НОВОЕ: жест из gesture-handler
+  tileId: string;
+  rotation?: number;  // ← НОВОЕ: угол поворота
+}
+
+const TileView: React.FC<TileViewProps> = ({ 
   textureSource,
   position,
   width,
   height,
-  panHandlers,
-  tileId = 'unknown'
+  gesture,
+  tileId = 'unknown',
+  rotation = 0,
 }) => {
   const { offset } = useGrid();
   const { scale } = useZoom();
   
-  const [debugInfo, setDebugInfo] = React.useState({ x: 0, y: 0, col: 0, row: 0 });
+  const [debugInfo, setDebugInfo] = React.useState({ x: 0, y: 0 });
   
   React.useEffect(() => {
     if (!position || typeof position.x !== 'number') return;
-    
-    const w = typeof width === 'number' ? width : 50;
-    const h = typeof height === 'number' ? height : 50;
-    
     setDebugInfo({
       x: Math.round(position.x),
       y: Math.round(position.y),
     });
-  }, [position, width, height]);
+  }, [position]);
 
   const tileStyle = {
-    position: 'absolute',
+    position: 'absolute' as const,
     left: position?.x || 0,
     top: position?.y || 0,
     width: typeof width === 'number' ? width : 50,
     height: typeof height === 'number' ? height : 50,
+    
+    // ← НОВОЕ: применяем поворот через transform
+    transform: [{ rotate: `${rotation}deg` }],
   };
 
   return (
-    <Animated.View {...panHandlers} style={[styles.tile, tileStyle]}>
+    // ← НОВОЕ: оборачиваем в GestureDetector если есть жест
+    <Animated.View style={[styles.tile, tileStyle]}>
       <Image source={textureSource} style={styles.image} resizeMode="cover" />
       <View style={styles.debugOverlay}>
         <Text style={styles.debugText}>{tileId}</Text>
         <Text style={styles.debugTextSmall}>{debugInfo.x},{debugInfo.y}</Text>
+        <Text style={styles.debugTextSmall}>🔄 {rotation}°</Text>
       </View>
     </Animated.View>
   );

@@ -28,13 +28,14 @@ import { getSnapToCellPosition } from './src/utils/gridUtils';
 
 import { TEXTURE_MAP, DEFAULT_TEXTURE } from './src/constants/textures';
 import { Tile } from './src/models/Tile';
+import { TileState } from './src/state';
 
 const testTexture = require('./assets/images/textures/test1.png');
 
 // ========================================
 // Компонент с жестом зума
 // ========================================
-const ZoomHandler = ({ children }) => {
+const ZoomHandler = ({ children }: { children: React.ReactNode }) => {
   const { scale, setScale, MIN_SCALE, MAX_SCALE } = useZoom();
   const pinchGesture = Gesture.Pinch().onUpdate((event) => {
     const newScale = scale * event.scale;
@@ -57,10 +58,6 @@ const PlacedTiles = () => {
   const { offset } = useGrid();
   
   const tiles = getAllTiles(); // Возвращает PlacedTileInfo[]
-
-  if (__DEV__) {
-    console.log('[PlacedTiles] Рендер, плиток:', tiles.length);
-  }
 
   return (
     <>
@@ -87,8 +84,9 @@ const PlacedTiles = () => {
             position={position}
             width={cellSize * scale}
             height={cellSize * scale}
-            panHandlers={{}}
             tileId={tile.id}
+            rotation={tile.rotation}  // ← НОВОЕ: поворот для размещённых плиток
+            // ← НЕ передаём gesture/panHandlers — размещённые плитки не интерактивны
           />
         );
       })}
@@ -105,7 +103,7 @@ const GameContent = () => {
   const { offset } = useGrid();
   const [isInitialized, setIsInitialized] = useState(false);
 
-  const activeTileIdRef = useRef(null);
+  const activeTileIdRef = useRef<string | null>(null);
   const hasActiveTileRef = useRef(false);
 
   // Инициализация первой плитки в спавнере
@@ -153,7 +151,7 @@ const GameContent = () => {
     }
   }, [createSpawnerTile]);
 
-  // 🔥 🔥 🔥 КЛЮЧЕВОЕ: Объявление draggableTile (БЫЛО ПРОПУЩЕНО!)
+  // 🔥 🔥 🔥 КЛЮЧЕВОЕ: Объявление draggableTile
   const draggableTile = useDraggable(
     spawnerTile,
     spawnerTile?.id || null, 
@@ -162,7 +160,7 @@ const GameContent = () => {
   );
 
   // 🔥 Отладочное логирование (только смена состояния)
-  const prevStateRef = useRef(null);
+  const prevStateRef = useRef<TileState | null>(null);
   useEffect(() => {
     if (draggableTile?.state !== prevStateRef.current) {
       console.log('[App] 🎮 FSM State:', draggableTile?.state);
@@ -180,38 +178,11 @@ const GameContent = () => {
 
   // 🔥 Показываем активную плитку ТОЛЬКО когда она не размещена
   const shouldRenderActiveTile =
-  hasActiveTileRef.current && 
-  draggableTile?.position?.x !== undefined && 
-  draggableTile?.position?.y !== undefined &&
-  draggableTile?.state !== 'PLACED' &&
-  spawnerTile !== null;
-
-  useEffect(() => {
-    if (__DEV__) {
-      console.log('[App] 🔍 shouldRenderActiveTile DEBUG:', {
-        hasActiveTileRef: hasActiveTileRef.current,
-        position: draggableTile?.position,
-        state: draggableTile?.state,
-        spawnerTileId: spawnerTile?.id,
-        shouldRender: shouldRenderActiveTile,
-      });
-    }
-  }, [
-    hasActiveTileRef.current,
-    draggableTile?.position,
-    draggableTile?.state,
-    spawnerTile?.id,
-    shouldRenderActiveTile,
-  ]);
-
-  useEffect(() => {
-    console.log('[App] 🔍 shouldRenderActiveTile:', {
-      hasActiveTileRef: hasActiveTileRef.current,
-      hasPosition: !!draggableTile?.position,
-      state: draggableTile?.state,
-      shouldRender: shouldRenderActiveTile,
-    });
-  }, [draggableTile?.state, draggableTile?.position]);
+    hasActiveTileRef.current && 
+    draggableTile?.position?.x !== undefined && 
+    draggableTile?.position?.y !== undefined &&
+    draggableTile?.state !== 'PLACED' &&
+    spawnerTile !== null;
 
   return (
     <View style={styles.gameContainer}>
@@ -223,15 +194,15 @@ const GameContent = () => {
       <PlacedTiles />
 
       {/* Активная плитка (только если не PLACED) */}
-      {shouldRenderActiveTile && spawnerTile && (
-        <GestureDetector gesture={draggableTile.panHandlers}>
+      {shouldRenderActiveTile && spawnerTile && draggableTile?.gesture && (
+        <GestureDetector gesture={draggableTile.gesture}>
           <TileView
-            // ← ИСПРАВЛЕНО: используем TEXTURE_MAP
             textureSource={TEXTURE_MAP[spawnerTile.textureKey] || DEFAULT_TEXTURE}
             position={draggableTile.position}
             width={draggableTile.width}
             height={draggableTile.height}
             tileId={spawnerTile.id}
+            rotation={draggableTile.rotation}  // ← Передаём угол поворота
           />
         </GestureDetector>
       )}

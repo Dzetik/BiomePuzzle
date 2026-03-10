@@ -106,14 +106,14 @@ export const useTileMachine = ({
     const initialContext: TileContext = {
       tileId: tile?.id || tileId,
       tileType,
-      tile: tile ?? null, 
+      tile: tile ?? null,  // ← Критично!
       position: { ...initialPosition },
       size: { width: spawnerPosition.width, height: spawnerPosition.height },
       spawnerPosition: { ...spawnerPosition },
       isInSpawner: true,
+      isAnimating: false,
       animatedPosition: animatedValuesRef.current.position,
       animatedSize: animatedValuesRef.current.size,
-      isAnimating: false,
       meta: {},
       createdAt: Date.now(),
     };
@@ -124,15 +124,24 @@ export const useTileMachine = ({
   useEffect(() => {
     if (machineRef.current && tileId) {
       const ctx = machineRef.current.getContext();
-      // Обновляем tileId только если он действительно изменился
+      
+      // 1. Синхронизируем tileId
       if (ctx.tileId !== tileId) {
         ctx.tileId = tileId;
         if (__DEV__) {
           console.log(`[TileMachine] tileId обновлён: ${ctx.tileId}`);
         }
       }
+      
+      // 2. ← НОВОЕ: Синхронизируем tile (экземпляр класса)
+      if (ctx.tile !== tile) {
+        ctx.tile = tile;
+        if (__DEV__) {
+          console.log(`[TileMachine] 🔄 Tile обновлён в контексте: ${tile?.id}`);
+        }
+      }
     }
-  }, [tileId]);
+  }, [tileId, tile]); 
   
   // --------------------------------------------------------------------------
   // 4. REACT STATE ДЛЯ ТРИГГЕРА РЕ-РЕНДЕРОВ
@@ -316,6 +325,30 @@ export const useTileMachine = ({
           }
         }, 2000);
         
+        break;
+      }
+
+      case 'ROTATE_TILE': {
+        if (machineRef.current) {
+          const ctx = machineRef.current.getContext();
+          if (ctx?.tile && typeof ctx.tile.rotate === 'function') {
+            const before = ctx.tile.rotation;
+            ctx.tile.rotate();
+            const after = ctx.tile.rotation;
+            
+            if (__DEV__) {
+              console.log(`[TileMachine] 🔄 Tile ${ctx.tile.id} rotated: ${before}° → ${after}°`);
+              console.log(`[TileMachine] 🎨 New edges:`, ctx.tile.currentEdges);
+            }
+          } else {
+            if (__DEV__) {
+              console.warn(`[TileMachine] ❌ ctx.tile or rotate() not available`, {
+                hasTile: !!ctx?.tile,
+                hasRotate: typeof ctx?.tile?.rotate,
+              });
+            }
+          }
+        }
         break;
       }
       

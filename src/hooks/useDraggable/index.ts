@@ -4,20 +4,32 @@
 // АДАПТЕР ДЛЯ ПОСТЕПЕННОЙ МИГРАЦИИ
 // ============================================================================
 
+import { TileEvent, TileState } from '../../state';
 import { useDraggableFSM } from './useDraggable.fsm';
 
 // ============================================================================
 // ТИПЫ
 // ============================================================================
 export interface UseDraggableReturn {
-  position: any;
-  width: any;
-  height: any;
-  panHandlers: any;
+  position: { x: number; y: number };
+  width: number;
+  height: number;
+  
+  // ← НОВОЕ: составной жест (заменяет panHandlers)
+  gesture: any;  // Тип Gesture из react-native-gesture-handler
+  
+  // ← НОВОЕ: текущий угол поворота плитки
+  rotation: number;
+  
   isInSpawner: boolean;
-  state?: string;
-  send?: (event: any) => void;
-  debug?: any;
+  state: TileState;
+  send: (event: TileEvent) => void;
+  debug?: {
+    isInSpawner: boolean;
+    currentCell?: { col: number; row: number };
+    position: { x: number; y: number };
+    fsmState: TileState;
+  } | null;
 }
 
 // ============================================================================

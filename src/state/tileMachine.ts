@@ -188,6 +188,18 @@ export class TileStateMachine {
           ],
           logMessage: 'Tile taken from spawner',
         };
+
+      case 'ROTATE':
+        return {
+          nextState: 'SPAWNER_IDLE',
+          contextUpdates: {},
+          actions: [
+            {
+              type: 'ROTATE_TILE',
+            },
+          ],
+          logMessage: `Tile rotated to ${this.context.tile?.rotation || 0}°`,
+        };
       
       // Принудительное удаление плитки
       case 'REMOVE':
