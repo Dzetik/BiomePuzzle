@@ -48,5 +48,11 @@ export const useDraggable = (
 // ============================================================================
 // ЭКСПОРТЫ
 // ============================================================================
-export { useDraggableFSM };
-export default useDraggable;
+// Главный хук
+export { useDraggableFSM } from './useDraggable.fsm';
+
+// ← НОВОЕ: экспорт функции жестов для переиспользования
+export { createDraggableGestures } from './useDraggable.gestures';
+
+// Default export для обратной совместимости
+export { useDraggableFSM as default } from './useDraggable.fsm';

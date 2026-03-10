@@ -18,7 +18,8 @@ import { useSpawner } from '../useSpawner';
 import { useGrid } from '../../context/GridContext';
 import { useTiles } from '../../context/TilesContext';
 import { GridService } from '../../services/GridService';
-import { Tile } from '../../models/Tile'; // ← ДОБАВЛЕНО: импорт класса Tile
+import { Tile } from '../../models/Tile';
+import { createDraggableGestures } from './useDraggable.gestures';
 
 // ============================================================================
 // ГЛАВНЫЙ ХУК
@@ -27,11 +28,12 @@ import { Tile } from '../../models/Tile'; // ← ДОБАВЛЕНО: импор�
 // Используется в App.js для каждой активной плитки.
 // ============================================================================
 export const useDraggableFSM = (
-  initialTileData: Tile | null = null,  // ← Теперь это Tile, не any
-  tileId: string | null = null,
-  externalInitialPosition: { x: number; y: number } | null = null,
-  onPlaced?: (cell: { col: number; row: number }) => void,
-  onReturned?: () => void
+  initialTileData: Tile | null = null,    // Данные плитки (экземпляр Tile)
+  tileId: string | null = null,           // Уникальный идентификатор плитки
+  externalInitialPosition: { x: number; y: number } | null = null,  // Начальная позиция
+  onPlaced?: (cell: { col: number; row: number }) => void,  // Колбэк размещения
+  onReturned?: () => void,  // Колбэк возврата в источник
+  source: 'SPAWNER' | 'INVENTORY' = 'SPAWNER',  // Источник плитки
 ): UseDraggableReturn => {
   
   // --------------------------------------------------------------------------
@@ -42,7 +44,6 @@ export const useDraggableFSM = (
   // Это нужно для обновления UI при изменении позиции во время драга.
   // --------------------------------------------------------------------------
   const [, forceUpdate] = useReducer(x => x + 1, 0);
-  const prevSpawnerTileIdRef = useRef<string | null>(null);
   
   // --------------------------------------------------------------------------
   // 2. ПОЛУЧЕНИЕ ДАННЫХ ИЗ КОНТЕКСТОВ
@@ -56,7 +57,7 @@ export const useDraggableFSM = (
   const { scale } = useZoom();
   const spawnerPos = useSpawner();
   const { offset } = useGrid();
-  const { spawnerTile, addTile, getSpawnerTile } = useTiles(); // ← ДОБАВЛЕНО: getSpawnerTile
+  const { spawnerTile, addTile, getSpawnerTile } = useTiles();
   
   // --------------------------------------------------------------------------
   // 3. СТАБИЛЬНЫЕ REFS (не триггерят ре-рендеры)
@@ -77,12 +78,15 @@ export const useDraggableFSM = (
   // Начальная позиция драга — для вычисления дельты перемещения
   const dragStartRef = useRef<{ x: number; y: number } | null>(null);
   
-  // Флаг возврата в спавнер — предотвращает сброс плитки во время анимации возврата
+  // Флаг возврата в источник — предотвращает сброс плитки во время анимации возврата
   const isReturningRef = useRef(false);
-
-  // ← НОВОЕ: Ref для хранения ссылки на активный экземпляр Tile
+  
+  // Ref для хранения ссылки на активный экземпляр Tile
   // Нужно чтобы передать правильный объект в addTile при размещении
   const currentTileRef = useRef<Tile | null>(null);
+  
+  // Ref для отслеживания предыдущего ID плитки в спавнере/инвентаре
+  const prevSourceTileIdRef = useRef<string | null>(null);
   
   // Обновляем scaleRef при изменении scale (без ре-рендера)
   scaleRef.current = scale || 1;
@@ -98,42 +102,35 @@ export const useDraggableFSM = (
   // --------------------------------------------------------------------------
   useEffect(() => {
     GridService.configure({
-      cellSize: DEFAULT_TILE_SIZE.width,  // Базовый размер ячейки (80px)
-      gridOffset: { x: offset?.x ?? 0, y: offset?.y ?? 0 },  // Смещение сетки
-      scale: scale ?? 1,  // Текущий масштаб
-      gridBounds: { startCol: -1, endCol: 6, startRow: -1, endRow: 12 },  // Границы сетки
+      cellSize: DEFAULT_TILE_SIZE.width,
+      gridOffset: { x: offset?.x ?? 0, y: offset?.y ?? 0 },
+      scale: scale ?? 1,
+      gridBounds: { startCol: -1, endCol: 6, startRow: -1, endRow: 12 },
     });
-  }, [offset?.x, offset?.y, scale]);  // Перенастраиваем при изменении этих параметров
+  }, [offset?.x, offset?.y, scale]);
 
   // --------------------------------------------------------------------------
   // 5. ВЫЧИСЛЕНИЕ НАЧАЛЬНОЙ ПОЗИЦИИ (мемоизировано)
   // --------------------------------------------------------------------------
   // Позиция вычисляется один раз и сохраняется в stableInitialPosition.
   // Если передана externalInitialPosition — используем её.
-  // Иначе вычисляем позицию центрирования плитки в спавнере.
+  // Иначе вычисляем позицию центрирования плитки в источнике.
   // --------------------------------------------------------------------------
   const stableInitialPosition = useMemo(() => {
-    // Если передана внешняя позиция — используем её
     if (externalInitialPosition) return externalInitialPosition;
     
-    // Получаем размер спавнера (100px по умолчанию)
     const spawnerSize = getSpawnerSize();
-    
-    // Получаем текущую позицию спавнера из ref
     const currentSpawner = spawnerPosRef.current;
     
-    // Если спавнер ещё не инициализирован — возвращаем (0, 0)
     if (!currentSpawner || typeof currentSpawner.x !== 'number') {
       return { x: 0, y: 0 };
     }
     
-    // Вычисляем позицию центрирования плитки в спавнере
-    // Формула: центр спавнера - половина размера плитки
     return {
       x: currentSpawner.x + (currentSpawner.size - spawnerSize) / 2,
       y: currentSpawner.y + (currentSpawner.size - spawnerSize) / 2,
     };
-  }, [externalInitialPosition]);  // Пересчитываем только при изменении externalInitialPosition
+  }, [externalInitialPosition]);
 
   // Синхронизируем positionRef с вычисленной позицией
   useEffect(() => {
@@ -154,7 +151,7 @@ export const useDraggableFSM = (
   // --------------------------------------------------------------------------
   // 7. ВЫЧИСЛЕНИЕ РАЗМЕРА ПЛИТКИ
   // --------------------------------------------------------------------------
-  // Размер плитки зависит от размера спавнера и текущего масштаба.
+  // Размер плитки зависит от размера источника и текущего масштаба.
   // Вычисляется на каждый рендер потому что scale может измениться.
   // --------------------------------------------------------------------------
   const spawnerSize = getSpawnerSize();
@@ -167,9 +164,7 @@ export const useDraggableFSM = (
   // Возвращает state, send, animated и context для управления плиткой.
   // --------------------------------------------------------------------------
   const { state, send, animated, context } = useTileMachine({
-    // ← ИСПРАВЛЕНО: берём ID из spawnerTile, не генерируем свой
     tileId: spawnerTile?.id || stableTileId.current!,
-    
     tileType: initialTileData?.textureKey || 'default',
     initialPosition: stableInitialPosition,
     spawnerPosition: {
@@ -178,10 +173,7 @@ export const useDraggableFSM = (
       width: tileSize,
       height: tileSize,
     },
-    
-    // ← НОВОЕ: Передаём экземпляр Tile в машину состояний
     tile: currentTileRef.current || spawnerTile,
-    
     onPlaced: (cell) => {
       if (currentTileRef.current) {
         addTile(cell.col, cell.row, currentTileRef.current);
@@ -195,21 +187,58 @@ export const useDraggableFSM = (
     },
   });
 
-  // ============================================================================
-  // СБРОС FSM ПРИ СМЕНЕ ПЛИТКИ В СПАВНЕРЕ
-  // ============================================================================
-  useEffect(() => {
-    if (spawnerTile?.id && spawnerTile.id !== prevSpawnerTileIdRef.current) {
-      positionRef.current = { ...stableInitialPosition };
-      send({ type: 'RESET_TO_SPAWNER' });
-      stableTileId.current = spawnerTile.id;
-      prevSpawnerTileIdRef.current = spawnerTile.id;
-      forceUpdate();
+  // --------------------------------------------------------------------------
+  // 9. ОБРАБОТКА КОНЦА DRAG (поиск ячейки)
+  // --------------------------------------------------------------------------
+  // Эта функция имеет доступ к GridService, scaleRef, tileSize, send()
+  // Поэтому она остаётся здесь, а не в gestures.ts
+  // --------------------------------------------------------------------------
+  const handleDragEnd = useCallback((endPosition: { x: number; y: number }) => {
+    send({ type: 'DRAG_END', payload: endPosition });
+    
+    const cell = GridService.findCellAtPosition(endPosition.x, endPosition.y, tileSize);
+    
+    if (cell) {
+      const isFree = GridService.isCellFree(cell.col, cell.row);
+      
+      if (isFree) {
+        send({ 
+          type: 'CELL_FOUND', 
+          payload: { 
+            col: cell.col, 
+            row: cell.row, 
+            isFree, 
+            scale: scaleRef.current,
+            baseTileSize: DEFAULT_TILE_SIZE.width,
+          } 
+        });
+      } else {
+        send({ type: 'NO_CELL' });
+      }
+    } else {
+      send({ type: 'NO_CELL' });
     }
-  }, [spawnerTile?.id, stableInitialPosition, send]);
+  }, [send, tileSize]);
 
   // --------------------------------------------------------------------------
-  // 9. СИНХРОНИЗАЦИЯ POSITION REF С ANIMATED
+  // 10. СОЗДАНИЕ ЖЕСТОВ (через модуль gestures)
+  // --------------------------------------------------------------------------
+  // Выносим логику жестов в отдельный модуль для переиспользования.
+  // Передаём handleDragEnd как колбэк для обработки конца перетаскивания.
+  // --------------------------------------------------------------------------
+  const { panGesture, tapGesture, composedGesture } = createDraggableGestures({
+    state,
+    send,
+    positionRef,
+    dragStartRef,
+    forceUpdate,
+    tileSize,
+    scaleRef,
+    onDragEnd: handleDragEnd,
+  });
+
+  // --------------------------------------------------------------------------
+  // 11. СИНХРОНИЗАЦИЯ POSITION REF С ANIMATED
   // --------------------------------------------------------------------------
   // Подписывается на изменения Animated.ValueXY позиции.
   // Обновляет positionRef для использования в жестах.
@@ -218,209 +247,93 @@ export const useDraggableFSM = (
   useEffect(() => {
     if (!animated?.position) return;
     
-    // Добавляем слушатель изменений позиции
     const listener = animated.position.addListener((value: { x: number; y: number }) => {
       positionRef.current = { x: value.x, y: value.y };
-      forceUpdate();  // Триггерим ре-рендер для обновления UI
+      forceUpdate();
     });
     
-    // Очищаем слушатель при размонтировании
     return () => {
       animated.position.removeListener(listener);
     };
   }, [animated?.position]);
 
   // --------------------------------------------------------------------------
-  // 10. ОТСЛЕЖИВАНИЕ НОВОЙ ПЛИТКИ В СПАВНЕРЕ
+  // 12. СИНХРОНИЗАЦИЯ tileId И tile В КОНТЕКСТЕ МАШИНЫ
   // --------------------------------------------------------------------------
-  // Когда размещённая плитка создаёт новую в спавнере, этот эффект
-  // обнаруживает изменение spawnerTile.id и сбрасывает FSM.
-  // isReturningRef предотвращает сброс во время анимации возврата.
+  // Машина создаётся один раз, но плитка может появиться позже.
+  // Этот эффект обновляет ссылку на экземпляр Tile и tileId в контексте.
   // --------------------------------------------------------------------------
   useEffect(() => {
-    // Если плитка возвращается в спавнер — не сбрасываем пока анимация не завершится
-    if (isReturningRef.current) return;
-    
-    // Если spawnerTile изменился и это новая плитка
-    if (spawnerTile?.id && spawnerTile.id !== stableTileId.current) {
-      // Обновляем stableTileId на новый ID
-      stableTileId.current = spawnerTile.id;
-      
-      // Сбрасываем позицию на начальную
-      positionRef.current = { ...stableInitialPosition };
-      
-      // Отправляем событие сброса в FSM
-      send({ type: 'RESET_TO_SPAWNER' });
-      
-      // Триггерим ре-рендер
-      forceUpdate();
-    }
-  }, [spawnerTile?.id, stableInitialPosition, send]);  // 🔥 state НЕ в зависимостях!
+    // Логика синхронизации уже есть в useTileMachine через эффект
+    // Здесь можно добавить дополнительные проверки если нужно
+  }, [spawnerTile?.id]);
 
   // --------------------------------------------------------------------------
-  // 11. ЛОГИРОВАНИЕ АКТИВНОСТИ ПЛИТКИ (только для отладки)
+  // 13. СБРОС FSM ПРИ СМЕНЕ ПЛИТКИ В ИСТОЧНИКЕ
   // --------------------------------------------------------------------------
-  // Логирует когда плитка становится активной в спавнере.
-  // Можно удалить в продакшене или обернуть в FEATURE_FLAGS.
+  // Сравнивает текущий ID источника с предыдущим, чтобы обнаружить смену плитки.
+  // Сбрасывает FSM и синхронизирует stableTileId атомарно.
   // --------------------------------------------------------------------------
   useEffect(() => {
-    if (state === 'SPAWNER_IDLE' && spawnerTile?.id === stableTileId.current) {
-      // Плитка в спавнере и готова к перетаскиванию
+    const sourceTileId = source === 'SPAWNER' ? spawnerTile?.id : undefined;
+    
+    if (sourceTileId && sourceTileId !== prevSourceTileIdRef.current) {
+      positionRef.current = { ...stableInitialPosition };
+      send({ type: 'RESET_TO_SPAWNER' });
+      stableTileId.current = sourceTileId;
+      prevSourceTileIdRef.current = sourceTileId;
+      forceUpdate();
     }
-  }, [state, spawnerTile?.id, stableTileId.current]);
+  }, [spawnerTile?.id, stableInitialPosition, send, source]);
+
+  // --------------------------------------------------------------------------
+  // 14. ОТСЛЕЖИВАНИЕ НОВОЙ ПЛИТКИ В ИСТОЧНИКЕ
+  // --------------------------------------------------------------------------
+  // Когда размещённая плитка создаёт новую в источнике, этот эффект
+  // обнаруживает изменение spawnerTile.id и сбрасывает FSM.
+  // --------------------------------------------------------------------------
+  useEffect(() => {
+    if (isReturningRef.current) return;
+    
+    if (spawnerTile?.id && spawnerTile.id !== stableTileId.current) {
+      stableTileId.current = spawnerTile.id;
+      positionRef.current = { ...stableInitialPosition };
+      send({ type: 'RESET_TO_SPAWNER' });
+      forceUpdate();
+    }
+  }, [spawnerTile?.id, stableInitialPosition, send]);
   
   // --------------------------------------------------------------------------
-  // 12. ОТСЛЕЖИВАНИЕ ВОЗВРАТА В СПАВНЕР
+  // 15. ОТСЛЕЖИВАНИЕ ВОЗВРАТА В ИСТОЧНИК
   // --------------------------------------------------------------------------
   // Обновляет isReturningRef при изменении состояния FSM.
   // Это предотвращает преждевременный сброс плитки во время анимации возврата.
   // --------------------------------------------------------------------------
   useEffect(() => {
-    if (state === 'RETURNING_TO_SPAWN') {
-      isReturningRef.current = true;  // Начался возврат
-    } else if (state === 'SPAWNER_IDLE') {
-      isReturningRef.current = false;  // Возврат завершён
+    if (state === 'RETURNING_TO_SPAWN' /*|| state === 'RETURNING_TO_INVENTORY'*/) {
+      isReturningRef.current = true;
+    } else if (state === 'SPAWNER_IDLE' /*|| state === 'INVENTORY_IDLE'*/) {
+      isReturningRef.current = false;
     }
   }, [state]);
 
-  // ============================================================================
-  // НОВЫЙ ЭФФЕКТ: Отслеживаем взятие плитки из спавнера
-  // ============================================================================
+  // --------------------------------------------------------------------------
+  // 16. ОТСЛЕЖИВАНИЕ ВЗЯТИЯ ПЛИТКИ ИЗ ИСТОЧНИКА
+  // --------------------------------------------------------------------------
   // Когда FSM переходит в состояние DRAGGING, мы берём плитку из контекста
   // и сохраняем ссылку на неё в currentTileRef для дальнейшего использования.
-  // ============================================================================
+  // --------------------------------------------------------------------------
   useEffect(() => {
     if (state === 'DRAGGING' && !currentTileRef.current) {
-      // Берём плитку из контекста (она должна быть там, так как мы её только что взяли)
-      const tile = getSpawnerTile();
+      const tile = source === 'SPAWNER' ? getSpawnerTile() : null;
       if (tile) {
         currentTileRef.current = tile;
-        if (__DEV__) {
-          console.log(`[Draggable] Плитка ${tile.id} захвачена для перетаскивания`);
-        }
       }
     }
-  }, [state, getSpawnerTile]); // ← getSpawnerTile в зависимостях
+  }, [state, getSpawnerTile, source]);
 
   // --------------------------------------------------------------------------
-  // 13. ЖЕСТ ПЕРЕТАСКИВАНИЯ (PAN GESTURE)
-  // --------------------------------------------------------------------------
-  // Обрабатывает ввод пользователя: начало, перемещение, конец драга.
-  // Преобразует жесты в события FSM через send().
-  // --------------------------------------------------------------------------
-  const panGesture = Gesture.Pan()
-    // Разрешаем жест только в состояниях SPAWNER_IDLE и DRAGGING
-    .enabled(state === 'SPAWNER_IDLE' || state === 'DRAGGING')
-    // Активируем сразу без задержки для отзывчивости
-    .activateAfterLongPress(0)
-    
-    // ------------------------------------------------------------------------
-    // НАЧАЛО ПЕРЕТАСКИВАНИЯ
-    // ------------------------------------------------------------------------
-    .onStart((e) => {
-      // Сохраняем начальную позицию для вычисления дельты
-      dragStartRef.current = { ...positionRef.current };
-      
-      // Если плитка в спавнере — отправляем событие начала драга
-      if (state === 'SPAWNER_IDLE') {
-        send({ type: 'TAKEN_FROM_SPAWN' });
-      }
-    })
-    
-    // ------------------------------------------------------------------------
-    // ПЕРЕМЕЩЕНИЕ ПЛИТКИ
-    // ------------------------------------------------------------------------
-    .onUpdate((e) => {
-      // Игнорируем если не в состоянии DRAGGING или нет начальной позиции
-      if (state !== 'DRAGGING' || !dragStartRef.current) return;
-      
-      // Вычисляем новую позицию на основе дельты жеста
-      const newX = dragStartRef.current.x + e.translationX;
-      const newY = dragStartRef.current.y + e.translationY;
-      
-      // Обновляем ref для использования в onEnd
-      positionRef.current = { x: newX, y: newY };
-      
-      // Отправляем событие перемещения в FSM
-      send({ type: 'DRAG_MOVE', payload: { x: newX, y: newY } });
-      
-      // Триггерим ре-рендер для обновления UI
-      forceUpdate();
-    })
-    
-    // ------------------------------------------------------------------------
-    // КОНЕЦ ПЕРЕТАСКИВАНИЯ
-    // ------------------------------------------------------------------------
-    .onEnd((e) => {
-      // Обрабатываем только если в состоянии DRAGGING
-      if (state === 'DRAGGING') {
-        // Получаем финальную позицию
-        const endPosition = { x: positionRef.current.x, y: positionRef.current.y };
-        
-        // Отправляем событие конца драга в FSM
-        send({ type: 'DRAG_END', payload: endPosition });
-        
-        // Ищем ячейку под плиткой через GridService
-        const cell = GridService.findCellAtPosition(endPosition.x, endPosition.y, tileSize);
-        
-        if (cell) {
-          // Проверяем свободна ли ячейка
-          const isFree = GridService.isCellFree(cell.col, cell.row);
-          
-          if (isFree) {
-            // Ячейка свободна — отправляем событие успешного размещения
-            send({ 
-              type: 'CELL_FOUND', 
-              payload: { 
-                col: cell.col, 
-                row: cell.row, 
-                isFree, 
-                scale: scaleRef.current,  // Текущий масштаб для расчёта размера
-                baseTileSize: DEFAULT_TILE_SIZE.width  // Базовый размер плитки
-              } 
-            });
-          } else {
-            // Ячейка занята — отправляем событие возврата в спавнер
-            send({ type: 'NO_CELL' });
-          }
-        } else {
-          // Ячейка не найдена — отправляем событие возврата в спавнер
-          send({ type: 'NO_CELL' });
-        }
-      }
-      
-      // Сбрасываем начальную позицию драга
-      dragStartRef.current = null;
-    });
-
-  // ============================================================================
-  // 13.1. ЖЕСТ ТАПА (ДЛЯ ПОВОРОТА)
-  // ============================================================================
-  // Срабатывает только в спавнере. Отправляет событие ROTATE в FSM.
-  // ============================================================================
-  const tapGesture = Gesture.Tap()
-    .enabled(state === 'SPAWNER_IDLE')
-    .maxDuration(250)
-    .maxDistance(10)
-    .onStart(() => {
-      send({ type: 'ROTATE' });
-      forceUpdate();
-      
-      if (__DEV__) {
-        console.log(`[Draggable] 🔄 ROTATE event sent`);
-      }
-    });
-
-  // ============================================================================
-  // 13.2. ОБЪЕДИНЯЕМ ЖЕСТЫ (Simultaneous)
-  // ============================================================================
-  // Pan имеет приоритет: если пользователь начал тащить — сработает он.
-  // Если просто тапнул — сработает tapGesture.
-  // ============================================================================
-  const composedGesture = Gesture.Simultaneous(panGesture, tapGesture);
-
-  // --------------------------------------------------------------------------
-  // 14. ВСПОМОГАТЕЛЬНАЯ ФУНКЦИЯ: ПОЛУЧЕНИЕ ЗНАЧЕНИЯ ANIMATED
+  // 17. ВСПОМОГАТЕЛЬНАЯ ФУНКЦИЯ: ПОЛУЧЕНИЕ ЗНАЧЕНИЯ ANIMATED
   // --------------------------------------------------------------------------
   // Безопасно извлекает числовое значение из Animated.Value.
   // Обрабатывает разные форматы (number, __getValue, _value).
@@ -435,25 +348,19 @@ export const useDraggableFSM = (
   };
 
   // --------------------------------------------------------------------------
-  // 15. ВОЗВРАЩАЕМОЕ ЗНАЧЕНИЕ
+  // 18. ВОЗВРАЩАЕМОЕ ЗНАЧЕНИЕ
   // --------------------------------------------------------------------------
-  // Объект который используется в App.js для рендера плитки и жестов.
+  // Объект который используется в компонентах для рендера плитки и жестов.
   // --------------------------------------------------------------------------
   return {
     position: { ...positionRef.current },
     width: getAnimatedValue(animated?.size?.width, tileSize),
     height: getAnimatedValue(animated?.size?.height, tileSize),
-    
-    // ← НОВОЕ: составной жест вместо panHandlers
     gesture: composedGesture,
-    
+    rotation: context?.tile?.rotation ?? 0,
     isInSpawner: state === 'SPAWNER_IDLE' || state === 'RETURNING_TO_SPAWN',
     state,
     send,
-    
-    // ← НОВОЕ: текущий угол поворота для визуала
-    rotation: context?.tile?.rotation ?? 0,
-    
     debug: context ? {
       isInSpawner: context.isInSpawner,
       currentCell: context.currentCell,
