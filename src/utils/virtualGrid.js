@@ -8,9 +8,9 @@ export const getVisibleBounds = (offsetX, offsetY, scale) => {
   const baseOffset = BASE_GRID_OFFSET.x * scale;
   
   const startCol = Math.floor((-baseOffset + offsetX) / cellSize - 1);
-  const endCol = Math.ceil((screenWidth - baseOffset + offsetX) / cellSize + 1);
+  const endCol = Math.ceil((screenWidth - baseOffset - offsetX) / cellSize + 1);
   const startRow = Math.floor((-baseOffset + offsetY) / cellSize - 1);
-  const endRow = Math.ceil((screenHeight - baseOffset + offsetY) / cellSize + 1);
+  const endRow = Math.ceil((screenHeight - baseOffset - offsetY) / cellSize + 1);
   
   return {
     startCol: Math.max(VIRTUAL_GRID.MIN_COL, startCol),
