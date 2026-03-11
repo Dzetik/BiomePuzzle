@@ -1,5 +1,13 @@
-// src/context/TilesContext.ts
-import React, { createContext, useContext, useState, useCallback, useMemo, ReactNode } from 'react';
+// ============================================================================
+// КОНТЕКСТ УПРАВЛЕНИЯ ПЛИТКАМИ (с поддержкой инвентаря)
+// ============================================================================
+// Этот контекст хранит всё состояние плиток в приложении:
+// - spawnerTile: активная плитка в спавнере
+// - placedTiles: размещённые на гриде плитки
+// - inventoryTiles: плитки в инвентаре (НОВОЕ)
+// ============================================================================
+
+import React, { createContext, useContext, useState, useCallback, ReactNode } from 'react';
 import { Tile } from '../models/Tile';
 import { getRandomTileDefinition } from '../data/tileDefinitions';
 
@@ -14,41 +22,45 @@ export interface PlacedTileInfo {
 }
 
 export interface TilesContextType {
-  // Размещённые плитки
-  placedTiles: Map<string, PlacedTileInfo>;
-  addTile: (col: number, row: number, tile: Tile) => void;
-  removeTile: (col: number, row: number) => void;
-  moveTile: (fromCol: number, fromRow: number, toCol: number, toRow: number, tile: Tile) => void;
-  isCellOccupied: (col: number, row: number) => boolean;
-  getTileAt: (col: number, row: number) => PlacedTileInfo | undefined;
-  getAllTiles: () => PlacedTileInfo[];
-  getOccupiedBounds: () => { minCol: number; maxCol: number; minRow: number; maxRow: number } | null;
-  
   // Спавнер
   spawnerTile: Tile | null;
   createSpawnerTile: (tile?: Tile) => Tile;
-  removeSpawnerTile: () => void;
-  takeTileFromSpawner: () => Tile | null;
-  returnTileToSpawner: (tile: Tile) => void;
-  hasTileInSpawner: () => boolean;
   getSpawnerTile: () => Tile | null;
+  clearSpawnerTile: () => void;
+  moveSpawnerTileToInventory: () => boolean;
+  
+  // Размещённые плитки (грид)
+  placedTiles: Map<string, PlacedTileInfo>;
+  addTile: (col: number, row: number, tile: Tile) => void;
+  removeTile: (tileId: string) => void;
+  getAllTiles: () => PlacedTileInfo[];
+  isCellFree: (col: number, row: number) => boolean;
+  isCellOccupied: (col: number, row: number) => boolean;
+  getTileAt: (col: number, row: number) => PlacedTileInfo | undefined;
+  getOccupiedBounds: () => { minCol: number; maxCol: number; minRow: number; maxRow: number } | null;
+  
+  // Инвентарь (НОВОЕ)
+  inventoryTiles: Tile[];
+  addToInventory: (tile: Tile) => boolean;
+  removeFromInventory: (tileId: string) => void;
+  getInventoryTile: (tileId: string) => Tile | undefined;
+  getInventoryTiles: () => Tile[];
+  isInventoryFull: () => boolean;
+  getInventoryFreeSlots: () => number;
+  clearInventory: () => void;
 }
 
 // ============================================================================
-// УТИЛИТЫ
+// КОНСТАНТЫ
 // ============================================================================
 
-const TILE_ID_PREFIX = 'tile';
-let tileCounter = 1;
-
-const generateTileId = () => `${TILE_ID_PREFIX}-${Date.now()}-${tileCounter++}`;
-const makeKey = (col: number, row: number): string => `${col},${row}`;
+const INVENTORY_MAX_SLOTS = 6; // Должно совпадать с inventory.ts
 
 // ============================================================================
-// КОНТЕКСТ
+// СОЗДАНИЕ КОНТЕКСТА
 // ============================================================================
 
-const TilesContext = createContext<TilesContextType | null>(null);
+const TilesContext = createContext<TilesContextType | undefined>(undefined);
 
 // ============================================================================
 // ПРОВАЙДЕР
@@ -59,109 +71,25 @@ interface TilesProviderProps {
 }
 
 export const TilesProvider: React.FC<TilesProviderProps> = ({ children }) => {
-  const [placedTiles, setPlacedTiles] = useState<Map<string, PlacedTileInfo>>(new Map());
+  // --------------------------------------------------------------------------
+  // 1. СОСТОЯНИЕ: СПАВНЕР
+  // --------------------------------------------------------------------------
   const [spawnerTile, setSpawnerTile] = useState<Tile | null>(null);
-
-  // ============================================================================
-  // ФУНКЦИИ ДЛЯ РАЗМЕЩЁННЫХ ПЛИТОК
-  // ============================================================================
-
-  const addTile = useCallback((col: number, row: number, tile: Tile) => {
-    const key = makeKey(col, row);
-    setPlacedTiles(prev => {
-      const newMap = new Map(prev);
-      
-      const existingEntry = Array.from(newMap.entries()).find(
-        ([_, value]) => value.tile.id === tile.id
-      );
-      
-      if (existingEntry) {
-        const [existingKey] = existingEntry;
-        newMap.delete(existingKey);
-        if (__DEV__) {
-          console.log(`[Tiles] Удалена старая запись ${existingKey} для плитки ${tile.id}`);
-        }
-      }
-      
-      newMap.set(key, { tile, col, row });
-      if (__DEV__) {
-        console.log(`[Tiles] Добавлена плитка ${tile.id} в [${col},${row}]`);
-      }
-      return newMap;
-    });
-  }, []);
-
-  const removeTile = useCallback((col: number, row: number) => {
-    const key = makeKey(col, row);
-    setPlacedTiles(prev => {
-      const newMap = new Map(prev);
-      newMap.delete(key);
-      return newMap;
-    });
-  }, []);
-
-  const moveTile = useCallback((fromCol: number, fromRow: number, toCol: number, toRow: number, tile: Tile) => {
-    const fromKey = makeKey(fromCol, fromRow);
-    const toKey = makeKey(toCol, toRow);
-    
-    setPlacedTiles(prev => {
-      const newMap = new Map(prev);
-      newMap.delete(fromKey);
-      
-      const otherEntries = Array.from(newMap.entries()).filter(
-        ([_, value]) => value.tile.id === tile.id
-      );
-      otherEntries.forEach(([key]) => {
-        newMap.delete(key);
-        if (__DEV__) {
-          console.log(`[Tiles] Удалена дублирующаяся запись ${key}`);
-        }
-      });
-      
-      newMap.set(toKey, { tile, col: toCol, row: toRow });
-      
-      if (__DEV__) {
-        console.log(`[Tiles] Перемещена плитка ${tile.id} из [${fromCol},${fromRow}] в [${toCol},${toRow}]`);
-      }
-      return newMap;
-    });
-  }, []);
-
-  const isCellOccupied = useCallback((col: number, row: number): boolean => {
-    const key = makeKey(col, row);
-    return placedTiles.has(key);
-  }, [placedTiles]);
-
-  const getTileAt = useCallback((col: number, row: number): PlacedTileInfo | undefined => {
-    const key = makeKey(col, row);
-    return placedTiles.get(key);
-  }, [placedTiles]);
-
-  const getAllTiles = useCallback((): PlacedTileInfo[] => {
-    return Array.from(placedTiles.values());
-  }, [placedTiles]);
-
-  const getOccupiedBounds = useCallback(() => {
-    if (placedTiles.size === 0) return null;
-    
-    let minCol = Infinity, maxCol = -Infinity;
-    let minRow = Infinity, maxRow = -Infinity;
-    
-    placedTiles.forEach((_, key) => {
-      const [col, row] = key.split(',').map(Number);
-      minCol = Math.min(minCol, col);
-      maxCol = Math.max(maxCol, col);
-      minRow = Math.min(minRow, row);
-      maxRow = Math.max(maxRow, row);
-    });
-    
-    return { minCol, maxCol, minRow, maxRow };
-  }, [placedTiles]);
-
-  // ============================================================================
-  // ФУНКЦИИ ДЛЯ СПАВНЕРА
-  // ============================================================================
-  let tileCounter = 1; 
+  
+  // --------------------------------------------------------------------------
+  // 2. СОСТОЯНИЕ: РАЗМЕЩЁННЫЕ ПЛИТКИ (ГРИД)
+  // --------------------------------------------------------------------------
+  const [placedTiles, setPlacedTiles] = useState<Map<string, PlacedTileInfo>>(new Map());
+  
+  // --------------------------------------------------------------------------
+  // 3. СОСТОЯНИЕ: ИНВЕНТАРЬ (НОВОЕ)
+  // --------------------------------------------------------------------------
+  const [inventoryTiles, setInventoryTiles] = useState<Tile[]>([]);
+  
+  // --------------------------------------------------------------------------
+  // 4. МЕТОДЫ: СПАВНЕР
+  // --------------------------------------------------------------------------
+  
   const createSpawnerTile = useCallback((tile?: Tile): Tile => {
     if (tile) {
       setSpawnerTile(tile);
@@ -169,83 +97,210 @@ export const TilesProvider: React.FC<TilesProviderProps> = ({ children }) => {
     }
     
     const definition = getRandomTileDefinition();
-    const instanceId = `tile-${Date.now()}-${tileCounter++}`;
-
+    const instanceId = `tile-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
     const newTile = new Tile({
-      ...definition,  // Берём textureKey, baseEdges из определения
-      id: instanceId, // ← Но перезаписываем id на уникальный
+      id: instanceId,
+      textureKey: definition.textureKey,
+      baseEdges: definition.baseEdges,
+      rotation: 0,  // ← Не используем spread, явно передаём только нужные поля
     });
     
-    if (__DEV__) {
-      console.log(`[Tiles] Создана новая плитка в спавнере: ${newTile.id}`);
-    }
     setSpawnerTile(newTile);
     return newTile;
   }, []);
-
-  const removeSpawnerTile = useCallback(() => {
-    if (__DEV__) {
-      console.log('[Tiles] Плитка удалена из спавнера');
-    }
-    setSpawnerTile(null);
-  }, []);
-
-  const takeTileFromSpawner = useCallback((): Tile | null => {
-    if (!spawnerTile) {
-      if (__DEV__) {
-        console.log('[Tiles] Попытка взять плитку из пустого спавнера');
-      }
-      return null;
-    }
-    
-    const tile = spawnerTile;
-    if (__DEV__) {
-      console.log(`[Tiles] Плитка ${tile.id} взята из спавнера`);
-    }
-    
-    setSpawnerTile(null);
-    return tile;
-  }, [spawnerTile]);
-
-  const returnTileToSpawner = useCallback((tile: Tile) => {
-    tile.resetRotation();
-    
-    if (__DEV__) {
-      console.log(`[Tiles] Плитка ${tile.id} возвращена в спавнер`);
-    }
-    setSpawnerTile(tile);
-  }, []);
-
-  const hasTileInSpawner = useCallback((): boolean => {
-    return spawnerTile !== null;
-  }, [spawnerTile]);
-
-  const getSpawnerTile = useCallback((): Tile | null => {
+  
+  const getSpawnerTile = useCallback(() => {
     return spawnerTile;
   }, [spawnerTile]);
+  
+  const clearSpawnerTile = useCallback(() => {
+    setSpawnerTile(null);
+  }, []);
+  
+  // --------------------------------------------------------------------------
+  // 5. МЕТОДЫ: РАЗМЕЩЁННЫЕ ПЛИТКИ
+  // --------------------------------------------------------------------------
+  
+  const addTile = useCallback((col: number, row: number, tile: Tile) => {
+    setPlacedTiles(prev => {
+      const newMap = new Map(prev);
+      newMap.set(tile.id, { tile, col, row });
+      return newMap;
+    });
+  }, []);
+  
+  const removeTile = useCallback((tileId: string) => {
+    setPlacedTiles(prev => {
+      const newMap = new Map(prev);
+      newMap.delete(tileId);
+      return newMap;
+    });
+  }, []);
+  
+  const getAllTiles = useCallback(() => {
+    return Array.from(placedTiles.values());
+  }, [placedTiles]);
+  
+  const isCellFree = useCallback((col: number, row: number): boolean => {
+    for (const [, info] of placedTiles) {
+      if (info.col === col && info.row === row) {
+        return false;
+      }
+    }
+    return true;
+  }, [placedTiles]);
+
+  const isCellOccupied = useCallback((col: number, row: number): boolean => {
+    // Просто инвертируем результат isCellFree
+    return !isCellFree(col, row);
+  }, [isCellFree]);
 
   // ============================================================================
-  // ЗНАЧЕНИЕ КОНТЕКСТА
+  // Возвращает информацию о плитке в указанной ячейке или undefined.
   // ============================================================================
+  const getTileAt = useCallback((col: number, row: number): PlacedTileInfo | undefined => {
+    // Ищем плитку по координатам в Map
+    for (const [key, info] of placedTiles) {
+      if (info.col === col && info.row === row) {
+        return info;
+      }
+    }
+    return undefined;
+  }, [placedTiles]);
 
-  const contextValue = useMemo(() => ({
-    placedTiles,
-    addTile, removeTile, moveTile,
-    isCellOccupied, getTileAt, getAllTiles, getOccupiedBounds,
-    spawnerTile,
-    createSpawnerTile, removeSpawnerTile,
-    takeTileFromSpawner, returnTileToSpawner,
-    hasTileInSpawner, getSpawnerTile,
-  }), [
-    placedTiles,
-    addTile, removeTile, moveTile,
-    isCellOccupied, getTileAt, getAllTiles, getOccupiedBounds,
-    spawnerTile,
-    createSpawnerTile, removeSpawnerTile,
-    takeTileFromSpawner, returnTileToSpawner,
-    hasTileInSpawner, getSpawnerTile,
-  ]);
+  // ============================================================================
+  // Возвращает минимальные и максимальные координаты занятых ячеек.
+  // Используется для определения области грида которую нужно отрендерить.
+  // ============================================================================
+  
+  const getOccupiedBounds = useCallback(() => {
+    if (placedTiles.size === 0) {
+      return null;  // Нет плиток — нет границ
+    }
+    
+    let minCol = Infinity;
+    let maxCol = -Infinity;
+    let minRow = Infinity;
+    let maxRow = -Infinity;
+    
+    for (const [, info] of placedTiles) {
+      minCol = Math.min(minCol, info.col);
+      maxCol = Math.max(maxCol, info.col);
+      minRow = Math.min(minRow, info.row);
+      maxRow = Math.max(maxRow, info.row);
+    }
+    
+    return { minCol, maxCol, minRow, maxRow };
+  }, [placedTiles]);
+  
+  // --------------------------------------------------------------------------
+  // 6. МЕТОДЫ: ИНВЕНТАРЬ (НОВОЕ)
+  // --------------------------------------------------------------------------
+  
+  const addToInventory = useCallback((tile: Tile): boolean => {
+    // Проверяем что инвентарь не полон
+    if (inventoryTiles.length >= INVENTORY_MAX_SLOTS) {
+      console.warn('[TilesContext] ❌ Инвентарь полон, нельзя добавить плитку');
+      return false;
+    }
+    
+    // Добавляем в начало массива (после счётчика)
+    setInventoryTiles(prev => [tile, ...prev]);
+    return true;
+  }, [inventoryTiles.length]);
+  
+  const removeFromInventory = useCallback((tileId: string) => {
+    setInventoryTiles(prev => prev.filter(t => t.id !== tileId));
+    console.log(`[TilesContext] 🗑️ Плитка ${tileId} удалена из инвентаря`);
+  }, []);
+  
+  const getInventoryTile = useCallback((tileId: string): Tile | undefined => {
+    return inventoryTiles.find(t => t.id === tileId);
+  }, [inventoryTiles]);
+  
+  const getInventoryTiles = useCallback(() => {
+    return inventoryTiles;
+  }, [inventoryTiles]);
+  
+  const isInventoryFull = useCallback(() => {
+    return inventoryTiles.length >= INVENTORY_MAX_SLOTS;
+  }, [inventoryTiles.length]);
+  
+  const getInventoryFreeSlots = useCallback(() => {
+    return INVENTORY_MAX_SLOTS - inventoryTiles.length;
+  }, [inventoryTiles.length]);
+  
+  const clearInventory = useCallback(() => {
+    setInventoryTiles([]);
+  }, []);
 
+  // ============================================================================
+  // МЕТОД: ПЕРЕМЕЩЕНИЕ ПЛИТКИ ИЗ СПАВНЕРА В ИНВЕНТАРЬ
+  // ============================================================================
+  // Удаляет плитку из спавнера и добавляет в инвентарь.
+  // Возвращает true если успешно, false если инвентарь полон или нет плитки.
+  // ============================================================================
+  const moveSpawnerTileToInventory = useCallback((): boolean => {
+    if (!spawnerTile) {
+      console.warn('[TilesContext] ❌ Нет плитки в спавнере');
+      return false;
+    }
+    
+    if (inventoryTiles.length >= INVENTORY_MAX_SLOTS) {
+      console.warn('[TilesContext] ❌ Инвентарь полон');
+      return false;
+    }
+    
+    const tileCopy = new Tile({
+      id: spawnerTile.id,
+      textureKey: spawnerTile.textureKey,
+      //baseEdges: spawnerTile.baseEdges,  // ← Важно: копируйте edges если есть
+    });
+
+    (tileCopy as any)._rotation = spawnerTile.rotation; 
+    
+    // Добавляем копию в инвентарь
+    setInventoryTiles(prev => [tileCopy, ...prev]);
+    // Очищаем спавнер (оригинал больше не нужен)
+    setSpawnerTile(null);
+    
+    console.log(`[TilesContext] ✅ Плитка ${spawnerTile.id} перемещена в инвентарь (копия)`);
+    return true;
+  }, [spawnerTile, inventoryTiles.length]);
+  
+  // --------------------------------------------------------------------------
+  // 7. ЗНАЧЕНИЕ КОНТЕКСТА
+  // --------------------------------------------------------------------------
+  
+  const contextValue: TilesContextType = {
+    // Спавнер
+    spawnerTile,
+    createSpawnerTile,
+    getSpawnerTile,
+    clearSpawnerTile,
+    moveSpawnerTileToInventory,
+    
+    // Размещённые плитки
+    placedTiles,
+    addTile,
+    removeTile,
+    getAllTiles,
+    isCellFree,
+    isCellOccupied,
+    getTileAt,
+    getOccupiedBounds,
+    
+    // Инвентарь
+    inventoryTiles,
+    addToInventory,
+    removeFromInventory,
+    getInventoryTile,
+    getInventoryTiles,
+    isInventoryFull,
+    getInventoryFreeSlots,
+    clearInventory,
+  };
+  
   return (
     <TilesContext.Provider value={contextValue}>
       {children}
@@ -254,7 +309,7 @@ export const TilesProvider: React.FC<TilesProviderProps> = ({ children }) => {
 };
 
 // ============================================================================
-// ХУК
+// ХУК ДЛЯ ИСПОЛЬЗОВАНИЯ КОНТЕКСТА
 // ============================================================================
 
 export const useTiles = (): TilesContextType => {

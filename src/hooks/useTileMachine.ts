@@ -64,6 +64,7 @@ export const useTileMachine = ({
   onStateChange,       // Колбэк при смене состояния (для синхронизации с родительским компонентом)
   onPlaced,            // Колбэк при успешном размещении плитки в ячейке
   onReturned,          // Колбэк при возврате плитки в спавнер
+  isInSpawner, 
 }: UseTileMachineOptions): UseTileMachineReturn => {
   
   // --------------------------------------------------------------------------
@@ -110,7 +111,8 @@ export const useTileMachine = ({
       position: { ...initialPosition },
       size: { width: spawnerPosition.width, height: spawnerPosition.height },
       spawnerPosition: { ...spawnerPosition },
-      isInSpawner: true,
+      isInSpawner: isInSpawner ?? true,
+      initialState: isInSpawner === false ? 'INVENTORY_IDLE' : undefined,
       isAnimating: false,
       animatedPosition: animatedValuesRef.current.position,
       animatedSize: animatedValuesRef.current.size,

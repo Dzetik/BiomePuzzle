@@ -16,11 +16,13 @@ import { Tile } from "../models";
  */
 export type TileState =
   | 'SPAWNER_IDLE'
+  | 'INVENTORY_IDLE'   
   | 'SPAWNER_RETURNING'
   | 'DRAGGING'
   | 'SNAPPING'
   | 'PLACED'
   | 'RETURNING_TO_SPAWN'
+  | 'RETURNING_TO_INVENTORY' 
   | 'REMOVED';
 
 // ============================================================================
@@ -29,6 +31,8 @@ export type TileState =
 export type TileEvent =
   // Взятие плитки из спавнера
   | { type: 'TAKEN_FROM_SPAWN' }
+
+  | { type: 'TAKEN_FROM_INVENTORY' }
   
   // Начало перетаскивания
   | { type: 'DRAG_START' }
@@ -58,12 +62,18 @@ export type TileEvent =
 
   | { type: 'RETURNED_TO_SPAWNER' } 
 
+  | { type: 'RETURN_TO_INVENTORY' }  //  возврат в инвентарь
+
+  | { type: 'RETURNED_TO_INVENTORY' }  //  завершение возврата
+
   | { type: 'DELAYED_ANIMATION_COMPLETE' }
   
   // Анимация завершена (внутреннее событие)
   | { type: 'ANIMATION_COMPLETE' }
 
-  | { type: 'ROTATE' }; 
+  | { type: 'ROTATE' }
+
+  | { type: 'SYNC_TILE'; payload: { tile: Tile } };
   
 
 // ============================================================================
@@ -81,6 +91,8 @@ export interface TileContext {
   size: { width: number; height: number };
   targetPosition?: { x: number; y: number }; // для анимаций
   
+  initialState?: TileState;
+
   // === Сетка ===
   currentCell?: { col: number; row: number }; // где плитка сейчас
   targetCell?: { col: number; row: number };  // куда хотим разместить
@@ -222,4 +234,5 @@ export interface UseTileMachineOptions {
   onPlaced?: (cell: { col: number; row: number }) => void;
   /** Колбэк при возврате в спавнер */
   onReturned?: () => void;
+  isInSpawner?: boolean;
 }

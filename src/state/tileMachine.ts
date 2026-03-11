@@ -44,7 +44,9 @@ export class TileStateMachine {
   constructor(initialContext: TileContext) {
     this.context = initialContext;
     // 🔥 Определяем начальное состояние: если плитка в спавнере — ждёт драга
-    this.currentState = initialContext.isInSpawner ? 'SPAWNER_IDLE' : 'DRAGGING';
+    this.currentState = initialContext.initialState ?? (
+      initialContext.isInSpawner ? 'SPAWNER_IDLE' : 'DRAGGING'
+    );
     
     // Логирование только в режиме разработки
     if (FEATURE_FLAGS.LOG_TRANSITIONS) {
@@ -87,10 +89,12 @@ export class TileStateMachine {
     
     // Логирование перехода (только в режиме разработки)
     if (FEATURE_FLAGS.LOG_TRANSITIONS) {
-      console.log(
-        `[FSM:${this.context.tileId}] ${prevState} --[${event.type}]--> ${transition.nextState}`,
-        transition.logMessage ? `| ${transition.logMessage}` : ''
-      );
+      if (prevState != "DRAGGING" && event.type != "DRAG_MOVE" && transition.nextState != "DRAGGING") {
+        console.log(
+          `[FSM:${this.context.tileId}] ${prevState} --[${event.type}]--> ${transition.nextState}`,
+          transition.logMessage ? `| ${transition.logMessage}` : ''
+        );
+      }
     }
     
     // Возвращаем prevState вместе с результатом
@@ -131,6 +135,9 @@ export class TileStateMachine {
     switch (state) {
       case 'SPAWNER_IDLE':
         return this.handleSpawnerIdle(event);
+
+      case 'INVENTORY_IDLE':
+        return this.handleInventoryIdle(event);
       
       case 'DRAGGING':
         return this.handleDragging(event);
@@ -143,6 +150,9 @@ export class TileStateMachine {
       
       case 'RETURNING_TO_SPAWN':
         return this.handleReturningToSpawn(event);
+
+      case 'RETURNING_TO_INVENTORY':
+        return this.handleReturningToInventory(event);
       
       // Терминальное состояние — плитка удалена, переходы невозможны
       case 'REMOVED':
@@ -200,6 +210,17 @@ export class TileStateMachine {
           ],
           logMessage: `Tile rotated to ${this.context.tile?.rotation || 0}°`,
         };
+
+      case 'SYNC_TILE':
+        return {
+          nextState: 'SPAWNER_IDLE',  // Остаёмся в том же состоянии
+          contextUpdates: {
+            tile: event.payload.tile,  // Обновляем ссылку на плитку в контексте
+            tileId: event.payload.tile.id,
+          },
+          actions: [],
+          logMessage: `Tile synced: ${event.payload.tile.id}`,
+        };
       
       // Принудительное удаление плитки
       case 'REMOVE':
@@ -211,6 +232,67 @@ export class TileStateMachine {
         };
       
       // Другие события игнорируются в этом состоянии
+      default:
+        return null;
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // INVENTORY_IDLE: Плитка в инвентаре, готова к перетаскиванию
+  // -------------------------------------------------------------------------
+  private handleInventoryIdle(event: TileEvent): TransitionResult | null {
+    switch (event.type) {
+      // Пользователь начал перетаскивание из инвентаря
+      case 'TAKEN_FROM_INVENTORY':
+        return {
+          nextState: 'DRAGGING',
+          contextUpdates: {
+            isInSpawner: false,
+            currentCell: undefined,
+            isAnimating: false,
+          },
+          actions: [
+            {
+              type: 'UPDATE_POSITION_IMMEDIATE',
+              payload: { ...this.context.position },
+            },
+          ],
+          logMessage: 'Tile taken from inventory',
+        };
+      
+      // Поворот плитки тапом (как в спавнере)
+      case 'ROTATE':
+        return {
+          nextState: 'INVENTORY_IDLE',
+          contextUpdates: {},
+          actions: [
+            {
+              type: 'ROTATE_TILE',
+            },
+          ],
+          logMessage: `Tile rotated to ${this.context.tile?.rotation || 0}°`,
+        };
+
+      case 'SYNC_TILE':
+        return {
+          nextState: 'INVENTORY_IDLE',  // Остаёмся в том же состоянии
+          contextUpdates: {
+            tile: event.payload.tile,  // Обновляем ссылку на плитку в контексте
+            tileId: event.payload.tile.id,
+          },
+          actions: [],
+          logMessage: `Tile synced: ${event.payload.tile.id}`,
+        };
+      
+      // Принудительное удаление
+      case 'REMOVE':
+        return {
+          nextState: 'REMOVED',
+          contextUpdates: {},
+          actions: [],
+          logMessage: 'Tile removed from inventory',
+        };
+      
       default:
         return null;
     }
@@ -235,7 +317,7 @@ export class TileStateMachine {
               payload: event.payload,
             },
           ],
-          logMessage: `Dragging to (${event.payload.x}, ${event.payload.y})`,
+          //logMessage: `Dragging to (${event.payload.x}, ${event.payload.y})`,
         };
       
       // Пользователь отпустил плитку — начинаем поиск ячейки
@@ -253,6 +335,34 @@ export class TileStateMachine {
       case 'RETURN_TO_SPAWN':
         return this.createReturnToSpawnerTransition('Manual return from drag');
       
+      case 'RESET_TO_SPAWNER':
+        return {
+          nextState: 'SPAWNER_IDLE',
+          contextUpdates: {
+            isInSpawner: true,
+            isAnimating: false,
+            currentCell: undefined,
+            targetCell: undefined,
+          },
+          actions: [
+            // Мгновенно перемещаем в позицию спавнера
+            {
+              type: 'UPDATE_POSITION_IMMEDIATE',
+              payload: { ...this.context.spawnerPosition },
+            },
+            // Анимируем размер к размеру спавнера
+            {
+              type: 'ANIMATE_SIZE',
+              payload: {
+                width: this.context.spawnerPosition.width,
+                height: this.context.spawnerPosition.height,
+                duration: DEFAULT_TILE_CONFIG.animationDuration,
+              },
+            },
+          ],
+          logMessage: 'Reset to spawner from dragging (new tile)',
+        };
+
       // Удаление плитки во время драга
       case 'REMOVE':
         return {
@@ -459,6 +569,28 @@ export class TileStateMachine {
           ],
           logMessage: 'Reset to spawner for new tile (size + position)',
         };
+
+      // Возврат в инвентарь (после неудачного размещения)  
+      case 'RETURN_TO_INVENTORY':
+        return {
+          nextState: 'RETURNING_TO_INVENTORY',
+          contextUpdates: {
+            currentCell: undefined,
+            isAnimating: true,
+            targetPosition: this.context.spawnerPosition,  // Будет перезаписано в useDraggable
+          },
+          actions: [
+            {
+              type: 'ANIMATE_TO_POSITION',
+              payload: {
+                x: this.context.spawnerPosition.x,
+                y: this.context.spawnerPosition.y,
+                duration: DEFAULT_TILE_CONFIG.animationDuration,
+              },
+            },
+          ],
+          logMessage: 'Returning tile to inventory',
+        };
       
       default:
         return null;
@@ -523,6 +655,39 @@ export class TileStateMachine {
           contextUpdates: { isAnimating: false },
           actions: [{ type: 'STOP_ANIMATIONS' }],
           logMessage: 'Tile removed while returning',
+        };
+      
+      default:
+        return null;
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // RETURNING_TO_INVENTORY: Плитка возвращается в инвентарь
+  // -------------------------------------------------------------------------
+  private handleReturningToInventory(event: TileEvent): TransitionResult | null {
+    switch (event.type) {
+      // Анимация возврата завершена
+      case 'ANIMATION_COMPLETE':
+        return {
+          nextState: 'INVENTORY_IDLE',
+          contextUpdates: {
+            isInSpawner: false,
+            isAnimating: false,
+            currentCell: undefined,
+            targetCell: undefined,
+          },
+          actions: [],
+          logMessage: 'Returned to inventory, now idle',
+        };
+      
+      // Удаление во время возврата
+      case 'REMOVE':
+        return {
+          nextState: 'REMOVED',
+          contextUpdates: { isAnimating: false },
+          actions: [{ type: 'STOP_ANIMATIONS' }],
+          logMessage: 'Tile removed while returning to inventory',
         };
       
       default:

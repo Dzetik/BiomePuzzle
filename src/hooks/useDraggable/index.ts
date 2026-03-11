@@ -1,27 +1,26 @@
-// src/hooks/useDraggable/index.ts
-
 // ============================================================================
-// АДАПТЕР ДЛЯ ПОСТЕПЕННОЙ МИГРАЦИИ
+// АДАПТЕР ДЛЯ useDraggableFSM
+// ============================================================================
+// Этот файл предоставляет упрощённый интерфейс для использования хука.
+// Все параметры передаются напрямую в useDraggableFSM.
 // ============================================================================
 
 import { TileEvent, TileState } from '../../state';
 import { useDraggableFSM } from './useDraggable.fsm';
+import { Tile } from '../../models/Tile';
 
 // ============================================================================
 // ТИПЫ
 // ============================================================================
+
 export interface UseDraggableReturn {
   position: { x: number; y: number };
   width: number;
   height: number;
-  
-  // ← НОВОЕ: составной жест (заменяет panHandlers)
-  gesture: any;  // Тип Gesture из react-native-gesture-handler
-  
-  // ← НОВОЕ: текущий угол поворота плитки
+  gesture: any;  // Gesture из react-native-gesture-handler
   rotation: number;
-  
   isInSpawner: boolean;
+  isInInventory: boolean;
   state: TileState;
   send: (event: TileEvent) => void;
   debug?: {
@@ -33,26 +32,35 @@ export interface UseDraggableReturn {
 }
 
 // ============================================================================
-// ГЛАВНАЯ ФУНКЦИЯ
+// ГЛАВНАЯ ФУНКЦИЯ (адаптер)
 // ============================================================================
+// Принимает все параметры и передаёт их в useDraggableFSM.
+// ============================================================================
+
 export const useDraggable = (
-  initialTileData: any = null,
+  initialTileData: Tile | null = null,
   tileId: string | null = null,
   externalInitialPosition: { x: number; y: number } | null = null,
-  onPlaced?: (cell: { col: number; row: number }) => void
+  onPlaced?: (cell: { col: number; row: number }) => void,
+  onReturned?: () => void,
+  source: 'SPAWNER' | 'INVENTORY' = 'SPAWNER',  
+  onDroppedInInventory?: () => void,
 ): UseDraggableReturn => {
-  // 🔥 Всегда используем FSM — legacy удалён
-  return useDraggableFSM(initialTileData, tileId, externalInitialPosition, onPlaced);
+  return useDraggableFSM(
+    initialTileData,
+    tileId,
+    externalInitialPosition,
+    onPlaced,
+    onReturned,
+    source,
+    onDroppedInInventory  
+  );
 };
 
 // ============================================================================
 // ЭКСПОРТЫ
 // ============================================================================
-// Главный хук
-export { useDraggableFSM } from './useDraggable.fsm';
 
-// ← НОВОЕ: экспорт функции жестов для переиспользования
+export { useDraggableFSM };
 export { createDraggableGestures } from './useDraggable.gestures';
-
-// Default export для обратной совместимости
-export { useDraggableFSM as default } from './useDraggable.fsm';
+export default useDraggable;

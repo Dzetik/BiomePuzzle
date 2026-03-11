@@ -1,6 +1,7 @@
 // src/components/TileView.tsx
 import React from 'react';
 import { Animated, Image, View, Text, StyleSheet } from 'react-native';
+import { StyleProp, ViewStyle } from 'react-native'; 
 import { useGrid } from '../context/GridContext';
 import { useZoom } from '../hooks/useZoom';
 
@@ -12,6 +13,7 @@ interface TileViewProps {
   gesture?: any;  // ← НОВОЕ: жест из gesture-handler
   tileId: string;
   rotation?: number;  // ← НОВОЕ: угол поворота
+  isInInventory?: boolean;
 }
 
 const TileView: React.FC<TileViewProps> = ({ 
@@ -22,6 +24,7 @@ const TileView: React.FC<TileViewProps> = ({
   gesture,
   tileId = 'unknown',
   rotation = 0,
+  isInInventory = false,
 }) => {
   const { offset } = useGrid();
   const { scale } = useZoom();
@@ -37,15 +40,25 @@ const TileView: React.FC<TileViewProps> = ({
   }, [position]);
 
   const tileStyle = {
-    position: 'absolute' as const,
-    left: position?.x || 0,
-    top: position?.y || 0,
+    position: (isInInventory ? 'relative' : 'absolute') as 'relative' | 'absolute',
+    
+    // Абсолютные координаты ТОЛЬКО если не в инвентаре
+    ...(!isInInventory && {
+      left: position?.x || 0,
+      top: position?.y || 0,
+    }),
+    
     width: typeof width === 'number' ? width : 50,
     height: typeof height === 'number' ? height : 50,
-    
-    // ← НОВОЕ: применяем поворот через transform
     transform: [{ rotate: `${rotation}deg` }],
-  };
+    
+    // Центрирование для инвентаря — с as const для каждого значения
+    ...(isInInventory && {
+      alignSelf: 'center' as const,  // ← as const для литерала
+      justifyContent: 'center' as const,
+      alignItems: 'center' as const,
+    }),
+  } satisfies StyleProp<ViewStyle>;  // ← satisfies для проверки типа
 
   return (
     // ← НОВОЕ: оборачиваем в GestureDetector если есть жест

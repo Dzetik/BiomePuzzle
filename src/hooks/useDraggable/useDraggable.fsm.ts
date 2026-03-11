@@ -20,6 +20,11 @@ import { useTiles } from '../../context/TilesContext';
 import { GridService } from '../../services/GridService';
 import { Tile } from '../../models/Tile';
 import { createDraggableGestures } from './useDraggable.gestures';
+import { Dimensions } from 'react-native';
+import {
+  INVENTORY_DROP_ZONE_TOTAL_HEIGHT,
+  INVENTORY_DROP_ZONE_PADDING_BOTTOM,
+} from '../../constants/inventory';
 
 // ============================================================================
 // ГЛАВНЫЙ ХУК
@@ -34,6 +39,7 @@ export const useDraggableFSM = (
   onPlaced?: (cell: { col: number; row: number }) => void,  // Колбэк размещения
   onReturned?: () => void,  // Колбэк возврата в источник
   source: 'SPAWNER' | 'INVENTORY' = 'SPAWNER',  // Источник плитки
+  onDroppedInInventory?: () => boolean,
 ): UseDraggableReturn => {
   
   // --------------------------------------------------------------------------
@@ -87,6 +93,8 @@ export const useDraggableFSM = (
   
   // Ref для отслеживания предыдущего ID плитки в спавнере/инвентаре
   const prevSourceTileIdRef = useRef<string | null>(null);
+
+  const lastSyncedTileIdRef = useRef<string | null>(null);
   
   // Обновляем scaleRef при изменении scale (без ре-рендера)
   scaleRef.current = scale || 1;
@@ -164,8 +172,12 @@ export const useDraggableFSM = (
   // Возвращает state, send, animated и context для управления плиткой.
   // --------------------------------------------------------------------------
   const { state, send, animated, context } = useTileMachine({
-    tileId: spawnerTile?.id || stableTileId.current!,
-    tileType: initialTileData?.textureKey || 'default',
+    // ← ИЗМЕНЕНО: Условный tileId в зависимости от source
+    tileId: source === 'SPAWNER' 
+      ? (spawnerTile?.id || stableTileId.current!) 
+      : (stableTileId.current!),
+    
+    tileType: initialTileData?.textureKey || spawnerTile?.textureKey || 'default',
     initialPosition: stableInitialPosition,
     spawnerPosition: {
       x: spawnerPosRef.current?.x || 0,
@@ -173,7 +185,14 @@ export const useDraggableFSM = (
       width: tileSize,
       height: tileSize,
     },
-    tile: currentTileRef.current || spawnerTile,
+
+    isInSpawner: source === 'SPAWNER',
+    
+    // ← ИЗМЕНЕНО: Условная плитка в зависимости от source
+    tile: source === 'SPAWNER' 
+      ? (currentTileRef.current || spawnerTile) 
+      : (currentTileRef.current || initialTileData),
+    
     onPlaced: (cell) => {
       if (currentTileRef.current) {
         addTile(cell.col, cell.row, currentTileRef.current);
@@ -187,13 +206,62 @@ export const useDraggableFSM = (
     },
   });
 
-  // --------------------------------------------------------------------------
-  // 9. ОБРАБОТКА КОНЦА DRAG (поиск ячейки)
-  // --------------------------------------------------------------------------
-  // Эта функция имеет доступ к GridService, scaleRef, tileSize, send()
-  // Поэтому она остаётся здесь, а не в gestures.ts
-  // --------------------------------------------------------------------------
+  useEffect(() => {
+    if (source === 'INVENTORY' && initialTileData) {
+      // Отправляем SYNC_TILE только если ID плитки изменился
+      // Это предотвращает бесконечный цикл из-за изменения ссылки send
+      if (initialTileData.id !== lastSyncedTileIdRef.current) {
+        send({ type: 'SYNC_TILE', payload: { tile: initialTileData } });
+        lastSyncedTileIdRef.current = initialTileData.id;
+        
+        if (__DEV__) {
+          console.log(`[Draggable] 🔧 SYNC_TILE sent: ${initialTileData.id}`);
+        }
+      }
+    }
+  }, [source, initialTileData?.id, send]);
+
+  // ============================================================================
+  // ОБРАБОТКА КОНЦА DRAG (проверка инвентаря ПЕРЕД поиском ячейки)
+  // ============================================================================
   const handleDragEnd = useCallback((endPosition: { x: number; y: number }) => {
+    
+    // ============================================================================
+    // ПРОВЕРКА ЗОНЫ СБРОСА В ИНВЕНТАРЬ (ПЕРЕД отправкой DRAG_END!)
+    // ============================================================================
+    // Только для плиток из спавнера. Если плитка отпущена в зоне инвентаря —
+    // НЕ отправляем DRAG_END, сразу вызываем колбэк и сбрасываем FSM.
+    // ============================================================================
+    if (source === 'SPAWNER' && onDroppedInInventory) {
+      const { height: screenHeight } = Dimensions.get('window');
+      const dropZoneTopY = screenHeight - INVENTORY_DROP_ZONE_TOTAL_HEIGHT - INVENTORY_DROP_ZONE_PADDING_BOTTOM;
+      
+      if (endPosition.y >= dropZoneTopY) {
+        if (__DEV__) {
+          console.log('[Draggable] 📦 Плитка dropped в зону инвентаря', {
+            endPositionY: endPosition.y,
+            dropZoneTopY,
+            screenHeight,
+          });
+        }
+        
+        const success = onDroppedInInventory?.();
+  
+        if (success) {
+          // Успех: плитка в инвентаре, сбрасываем FSM для новой плитки
+          send({ type: 'RESET_TO_SPAWNER' });
+        } else {
+          send({ type: 'DRAG_END', payload: endPosition });
+          send({ type: 'NO_CELL' });
+        }
+        
+        return;
+      }
+    }
+    
+    // ============================================================================
+    // СТАНДАРТНАЯ ЛОГИКА: Отправляем DRAG_END и ищем ячейку грида
+    // ============================================================================
     send({ type: 'DRAG_END', payload: endPosition });
     
     const cell = GridService.findCellAtPosition(endPosition.x, endPosition.y, tileSize);
@@ -218,7 +286,7 @@ export const useDraggableFSM = (
     } else {
       send({ type: 'NO_CELL' });
     }
-  }, [send, tileSize]);
+  }, [send, tileSize, source, onDroppedInInventory, scaleRef]);
 
   // --------------------------------------------------------------------------
   // 10. СОЗДАНИЕ ЖЕСТОВ (через модуль gestures)
@@ -249,7 +317,6 @@ export const useDraggableFSM = (
     
     const listener = animated.position.addListener((value: { x: number; y: number }) => {
       positionRef.current = { x: value.x, y: value.y };
-      forceUpdate();
     });
     
     return () => {
@@ -278,11 +345,18 @@ export const useDraggableFSM = (
     const sourceTileId = source === 'SPAWNER' ? spawnerTile?.id : undefined;
     
     if (sourceTileId && sourceTileId !== prevSourceTileIdRef.current) {
-      positionRef.current = { ...stableInitialPosition };
-      send({ type: 'RESET_TO_SPAWNER' });
       stableTileId.current = sourceTileId;
       prevSourceTileIdRef.current = sourceTileId;
+      
+      // Сбрасываем позицию
+      positionRef.current = { ...stableInitialPosition };
+      
+      send({ type: 'RESET_TO_SPAWNER' });
       forceUpdate();
+      
+      if (__DEV__) {
+        console.log('[Draggable] 🔄 FSM сброшен для новой плитки:', sourceTileId);
+      }
     }
   }, [spawnerTile?.id, stableInitialPosition, send, source]);
 
@@ -298,7 +372,9 @@ export const useDraggableFSM = (
     if (spawnerTile?.id && spawnerTile.id !== stableTileId.current) {
       stableTileId.current = spawnerTile.id;
       positionRef.current = { ...stableInitialPosition };
-      send({ type: 'RESET_TO_SPAWNER' });
+      if (state === 'SPAWNER_IDLE' || state === 'INVENTORY_IDLE') {
+        send({ type: 'RESET_TO_SPAWNER' });
+      }
       forceUpdate();
     }
   }, [spawnerTile?.id, stableInitialPosition, send]);
@@ -310,9 +386,9 @@ export const useDraggableFSM = (
   // Это предотвращает преждевременный сброс плитки во время анимации возврата.
   // --------------------------------------------------------------------------
   useEffect(() => {
-    if (state === 'RETURNING_TO_SPAWN' /*|| state === 'RETURNING_TO_INVENTORY'*/) {
+    if (state === 'RETURNING_TO_SPAWN' || state === 'RETURNING_TO_INVENTORY') {
       isReturningRef.current = true;
-    } else if (state === 'SPAWNER_IDLE' /*|| state === 'INVENTORY_IDLE'*/) {
+    } else if (state === 'SPAWNER_IDLE' || state === 'INVENTORY_IDLE') {
       isReturningRef.current = false;
     }
   }, [state]);
@@ -326,11 +402,14 @@ export const useDraggableFSM = (
   useEffect(() => {
     if (state === 'DRAGGING' && !currentTileRef.current) {
       const tile = source === 'SPAWNER' ? getSpawnerTile() : null;
+      // Для инвентаря плитка передаётся напрямую через initialTileData
       if (tile) {
         currentTileRef.current = tile;
+      } else if (initialTileData) {
+        currentTileRef.current = initialTileData;
       }
     }
-  }, [state, getSpawnerTile, source]);
+  }, [state, getSpawnerTile, source, initialTileData]);
 
   // --------------------------------------------------------------------------
   // 17. ВСПОМОГАТЕЛЬНАЯ ФУНКЦИЯ: ПОЛУЧЕНИЕ ЗНАЧЕНИЯ ANIMATED
@@ -357,8 +436,11 @@ export const useDraggableFSM = (
     width: getAnimatedValue(animated?.size?.width, tileSize),
     height: getAnimatedValue(animated?.size?.height, tileSize),
     gesture: composedGesture,
-    rotation: context?.tile?.rotation ?? 0,
+    rotation: source === 'SPAWNER' 
+      ? (spawnerTile?.rotation ?? 0)  // Для спавнера: берём напрямую из контекста
+      : (initialTileData?.rotation ?? context?.tile?.rotation ?? 0),
     isInSpawner: state === 'SPAWNER_IDLE' || state === 'RETURNING_TO_SPAWN',
+    isInInventory: state === 'INVENTORY_IDLE' || state === 'RETURNING_TO_INVENTORY',
     state,
     send,
     debug: context ? {

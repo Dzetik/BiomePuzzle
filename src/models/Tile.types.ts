@@ -14,5 +14,5 @@ export interface EdgeColors {
 export interface TileData {
   id: string;
   textureKey: string; // Ключ текстуры для маппинга в UI слое
-  baseEdges: EdgeColors; // Цвета рёбер в состоянии поворота 0
+  baseEdges?: EdgeColors; // Цвета рёбер в состоянии поворота 0
 }

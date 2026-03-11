@@ -54,7 +54,7 @@ export const createDraggableGestures = ({
   // --------------------------------------------------------------------------
   const panGesture = Gesture.Pan()
     // Разрешаем жест только в состояниях, когда плитка может двигаться
-    .enabled(state === 'SPAWNER_IDLE' /*|| state === 'INVENTORY_IDLE' */|| state === 'DRAGGING')
+    .enabled(state === 'SPAWNER_IDLE' || state === 'INVENTORY_IDLE' || state === 'DRAGGING')
     // Активируем сразу без задержки для отзывчивости
     .activateAfterLongPress(0)
     
@@ -66,9 +66,9 @@ export const createDraggableGestures = ({
       // Отправляем событие начала драга в зависимости от источника
       if (state === 'SPAWNER_IDLE') {
         send({ type: 'TAKEN_FROM_SPAWN' });
-      } /*else if (state === 'INVENTORY_IDLE') {
+      } else if (state === 'INVENTORY_IDLE') {
         send({ type: 'TAKEN_FROM_INVENTORY' });
-      }*/
+      }
     })
     
     // ПЕРЕМЕЩЕНИЕ ПЛИТКИ
@@ -113,12 +113,15 @@ export const createDraggableGestures = ({
   // --------------------------------------------------------------------------
   const tapGesture = Gesture.Tap()
     // Разрешаем тап только когда плитка в источнике (не в драге)
-    .enabled(state === 'SPAWNER_IDLE' /*|| state === 'INVENTORY_IDLE'*/)
+    .enabled(state === 'SPAWNER_IDLE' || state === 'INVENTORY_IDLE')
     // Не дольше 250ms чтобы не конфликтовать с началом драга
     .maxDuration(250)
     // Не дальше 10px чтобы короткий свайп не считался тапом
     .maxDistance(10)
     .onStart(() => {
+      if (__DEV__) {
+        console.log(`[Gesture] 🎯 Tap detected! state=${state}`);
+      }
       // Отправляем событие поворота в FSM
       send({ type: 'ROTATE' });
       // Триггерим ре-рендер для обновления визуала (угол поворота)

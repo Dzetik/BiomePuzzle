@@ -15,7 +15,7 @@ import { DEFAULT_TILE_SIZE } from './tile';
 
 // Высота всей панели инвентаря (в пикселях)
 // Должна быть достаточно большой для плитки + отступы + кнопки
-export const INVENTORY_HEIGHT = 100;
+export const INVENTORY_HEIGHT = 110;
 
 // Размер одной ячейки/плитки (должен совпадать с размером плитки на гриде)
 export const INVENTORY_CELL_SIZE = DEFAULT_TILE_SIZE.width; // 80px
@@ -31,6 +31,24 @@ export const INVENTORY_SCROLL_BUTTON_SIZE = 40;
 
 // Отступ от кнопок до области плиток
 export const INVENTORY_BUTTON_MARGIN = 8;
+
+// ============================================================================
+// ЗОНА СБРОСА (DROP ZONE)
+// ============================================================================
+// Зона сброса = сама панель инвентаря.
+// Эти константы используются для определения попадания плитки при драге.
+// ============================================================================
+
+// Отступ от низа экрана для зоны сброса (учитывает safe area на iOS)
+export const INVENTORY_DROP_ZONE_PADDING_BOTTOM = 0;
+
+// Дополнительный "буфер" сверху панели для более удобного сброса (в пикселях)
+// Плитка будет считаться сброшенной в инвентарь даже если отпущена чуть выше панели
+export const INVENTORY_DROP_ZONE_BUFFER_TOP = 20;
+
+// Вычисляемая высота зоны сброса (панель + буфер)
+export const INVENTORY_DROP_ZONE_TOTAL_HEIGHT = 
+  INVENTORY_HEIGHT + INVENTORY_DROP_ZONE_BUFFER_TOP;
 
 // ============================================================================
 // КОЛИЧЕСТВО СЛОТОВ
@@ -141,6 +159,11 @@ export const INVENTORY_CONFIG = {
   PADDING_HORIZONTAL: INVENTORY_PADDING_HORIZONTAL,
   SCROLL_BUTTON_SIZE: INVENTORY_SCROLL_BUTTON_SIZE,
   BUTTON_MARGIN: INVENTORY_BUTTON_MARGIN,
+  
+  // Зона сброса
+  DROP_ZONE_PADDING_BOTTOM: INVENTORY_DROP_ZONE_PADDING_BOTTOM,
+  DROP_ZONE_BUFFER_TOP: INVENTORY_DROP_ZONE_BUFFER_TOP,
+  DROP_ZONE_TOTAL_HEIGHT: INVENTORY_DROP_ZONE_TOTAL_HEIGHT,
   
   // Количество
   MAX_SLOTS: INVENTORY_MAX_SLOTS,
