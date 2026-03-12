@@ -1,14 +1,22 @@
 // ============================================================================
-// ЯЧЕЙКА ПЛИТКИ В ИНВЕНТАРЕ
-// ============================================================================
-// Этот компонент отображает отдельную плитку в инвентаре.
-// Поддерживает:
-// - Tap для поворота на 90°
-// - Drag для перетаскивания на грид
+// ЯЧЕЙКА ПЛИТКИ В ИНВЕНТАРЕ (ИСПРАВЛЕННАЯ ВЕРСИЯ — БЕЗ МИГАНИЯ)
 // ============================================================================
 
+// ============================================================================
+// ГЛОБАЛЬНОЕ СОСТОЯНИЕ ДЛЯ DRAG (временное решение)
+// ============================================================================
+declare global {
+  var inventoryDragState: {
+    position: { x: number; y: number };
+    size: { width: number; height: number };
+    rotation: number;
+    isDragging: boolean;
+    tileId: string | null;
+  } | undefined;
+}
+
 import React, { useMemo, useCallback, useRef, useEffect } from 'react';
-import { View, StyleSheet } from 'react-native';
+import { View, StyleSheet, Dimensions } from 'react-native';
 import { GestureDetector } from 'react-native-gesture-handler';
 import { Tile } from '../models/Tile';
 import TileView from './TileView';
@@ -22,20 +30,12 @@ import {
 import { useDraggable } from '../hooks/useDraggable';
 import { useTiles } from '../context/TilesContext';
 
-// ============================================================================
-// ПРОПСЫ
-// ============================================================================
-
 interface InventoryCellProps {
-  tile: Tile;                      // Экземпляр плитки
-  index: number;                   // Визуальный индекс в видимом окне
-  onTap: (tileId: string) => void; // Обработчик тапа (поворот)
-  onDragStart: (tileId: string) => void; // Обработчик начала драга
+  tile: Tile;
+  index: number;
+  onTap: (tileId: string) => void;
+  onDragStart: (tileId: string) => void;
 }
-
-// ============================================================================
-// КОМПОНЕНТ
-// ============================================================================
 
 const InventoryCell: React.FC<InventoryCellProps> = ({
   tile,
@@ -43,114 +43,185 @@ const InventoryCell: React.FC<InventoryCellProps> = ({
   onTap,
   onDragStart,
 }) => {
-  const { removeFromInventory, addToInventory } = useTiles();
+  const { removeFromInventory, addToInventory, setActiveInventoryTileId } = useTiles();
   
-  // Ref для отслеживания успешности размещения
   const placementSuccessRef = useRef(false);
-  
-  // Получаем текстуру из маппинга
   const textureSource = TEXTURE_MAP[tile.textureKey] || DEFAULT_TEXTURE;
   
-  // --------------------------------------------------------------------------
-  // ВЫЧИСЛЕНИЕ ПОЗИЦИИ ПЛИТКИ В ИНВЕНТАРЕ
-  // --------------------------------------------------------------------------
-  // Позиция вычисляется динамически на основе индекса и конфига.
-  // Это нужно для корректного перетаскивания на грид.
-  // --------------------------------------------------------------------------
+  // ============================================================================
+  // 🔑 НОВОЕ: Refs для предотвращения перезаписи позиции от жеста
+  // ============================================================================
+  const hasInitializedPositionRef = useRef(false);
+  
+  // ============================================================================
+  // ВЫЧИСЛЕНИЕ ПОЗИЦИИ ЯЧЕЙКИ НА ЭКРАНЕ
+  // ============================================================================
   const initialPosition = useMemo(() => {
-    // Получаем размеры экрана для вычисления позиции
-    const { width: screenWidth, height: screenHeight } = require('react-native').Dimensions.get('window');
+    const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
     
-    // Позиция: левый край + кнопки + счётчик + индекс * размер
-    const buttonWidth = 40; // INVENTORY_SCROLL_BUTTON_SIZE
-    const buttonMargin = 8; // INVENTORY_BUTTON_MARGIN
-    const counterWidth = 80; // INVENTORY_CELL_SIZE
-    const cellSpacing = 8; // INVENTORY_CELL_SPACING
+    const buttonWidth = 40;
+    const buttonMargin = 8;
+    const counterWidth = 80;
+    const cellSpacing = 8;
     
     const startX = buttonMargin + buttonWidth + buttonMargin + counterWidth;
     
-    return {
+    const pos = {
       x: startX + index * (INVENTORY_CELL_SIZE + cellSpacing),
-      y: screenHeight - 110 + 15, // INVENTORY_HEIGHT + отступ
+      y: screenHeight - 110 + 15,
     };
+    
+    if (__DEV__) {
+      console.log(`[InventoryCell] 📍 Cell ${index} initialPosition:`, pos);
+    }
+    return pos;
   }, [index]);
   
-  // --------------------------------------------------------------------------
-  // КОЛБЭК: ПЛИТКА РАЗМЕЩЕНА НА ГРИДЕ
-  // --------------------------------------------------------------------------
+  // ============================================================================
+  // КОЛБЭКИ
+  // ============================================================================
   const handlePlaced = useCallback((cell: { col: number; row: number }) => {
     placementSuccessRef.current = true;
-    
-    // Удаляем плитку из инвентаря при успешном размещении
+    setActiveInventoryTileId(null);
     removeFromInventory(tile.id);
-    
-    console.log(`[InventoryCell] ✅ Плитка ${tile.id} размещена в [${cell.col},${cell.row}]`);
-  }, [tile.id, removeFromInventory]);
+    console.log(`[InventoryCell] ✅ Placed ${tile.id} at [${cell.col},${cell.row}]`);
+  }, [tile.id, removeFromInventory, setActiveInventoryTileId]);
   
-  // --------------------------------------------------------------------------
-  // КОЛБЭК: ПЛИТКА ВЕРНУЛАСЬ (НЕУДАЧНОЕ РАЗМЕЩЕНИЕ)
-  // --------------------------------------------------------------------------
   const handleReturned = useCallback(() => {
-    console.log(`[InventoryCell] 🔄 Плитка ${tile.id} вернулась в инвентарь`);
-    // Возвращаем плитку обратно в инвентарь
+    setActiveInventoryTileId(null);
+    console.log(`[InventoryCell] 🔄 Returned ${tile.id} to inventory`);
     addToInventory(tile);
-  }, [tile, addToInventory]);
+  }, [tile, addToInventory, setActiveInventoryTileId]);
   
-  // --------------------------------------------------------------------------
-  // ИНТЕГРАЦИЯ С useDraggable
-  // --------------------------------------------------------------------------
+  // ============================================================================
+  // useDraggable
+  // ============================================================================
   const draggable = useDraggable(
-    tile,                                    // Экземпляр плитки
-    tile.id,                                 // ID плитки
-    initialPosition,                         // Начальная позиция
-    handlePlaced,                            // onPlaced: размещение на гриде
-    handleReturned,                          // onReturned: возврат в инвентарь
-    'INVENTORY'                              // source
+    tile,
+    tile.id,
+    initialPosition,
+    handlePlaced,
+    handleReturned,
+    'INVENTORY'
   );
   
   // ============================================================================
-  // 🔑 КЛЮЧЕВОЕ ИСПРАВЛЕНИЕ #1: Динамический isInInventory
+  // 🔑 Отслеживать состояние драга и сообщать контексту
   // ============================================================================
-  // Плитка в инвентаре только когда НЕ в драге.
-  // Во время драга используем абсолютное позиционирование для следования за пальцем.
-  // ============================================================================
-  const isInInventory = draggable.state !== 'DRAGGING';
+  useEffect(() => {
+    if (draggable.state === 'DRAGGING') {
+      setActiveInventoryTileId(tile.id);
+      if (__DEV__) {
+        console.log(`[InventoryCell] 🎯 START DRAG: ${tile.id}`);
+      }
+    } else if (
+      draggable.state === 'INVENTORY_IDLE' || 
+      draggable.state === 'PLACED' || 
+      draggable.state === 'RETURNING_TO_INVENTORY'
+    ) {
+      setActiveInventoryTileId(null);
+      if (__DEV__) {
+        console.log(`[InventoryCell] 🏁 END DRAG: ${tile.id} (state: ${draggable.state})`);
+      }
+    }
+  }, [draggable.state, tile.id, setActiveInventoryTileId]);
   
-  // --------------------------------------------------------------------------
-  // РЕНДЕР
-  // --------------------------------------------------------------------------
+  // ============================================================================
+  // 🔑 Обновление глобального состояния позиции для App (ИСПРАВЛЕННОЕ)
+  // ============================================================================
+  useEffect(() => {
+    if (draggable.state === 'DRAGGING') {
+      if (!global.inventoryDragState) {
+        global.inventoryDragState = {
+          position: { x: 0, y: 0 },
+          size: { width: 100, height: 100 },
+          rotation: 0,
+          isDragging: false,
+          tileId: null,
+        };
+      }
+      
+      // ============================================================================
+      // 🔑 FIX: Не перезаписывать позицию, если жест уже установил правильную
+      // ============================================================================
+      // Жест в useDraggable.gestures.ts устанавливает позицию в onStart()
+      // на основе e.absoluteX/Y (точка касания). Не перезаписываем её позицией
+      // из draggable.position, которая может быть устаревшей (позиция ячейки).
+      // ============================================================================
+      const isFirstDragFrame = !hasInitializedPositionRef.current;
+      const gestureAlreadySetPosition = global.inventoryDragState.isDragging && 
+        (Math.abs(global.inventoryDragState.position.x - initialPosition.x) > 10 || 
+         Math.abs(global.inventoryDragState.position.y - initialPosition.y) > 10);
+      
+      // Обновляем позицию ТОЛЬКО если:
+      // 1. Это первый кадр драга (жест ещё не сработал), ИЛИ
+      // 2. Жест ещё не установил позицию (разница < 10px = скорее всего ячейка)
+      if (isFirstDragFrame || !gestureAlreadySetPosition) {
+        global.inventoryDragState.position = { x: draggable.position.x, y: draggable.position.y };
+      }
+      
+      // Эти поля обновляем всегда (они не конфликтуют с жестом)
+      global.inventoryDragState.size = { width: draggable.width, height: draggable.height };
+      global.inventoryDragState.rotation = draggable.rotation;
+      global.inventoryDragState.isDragging = true;
+      global.inventoryDragState.tileId = tile.id;
+      
+      // Помечаем что инициализировали (чтобы не сбрасывать позицию в следующих кадрах)
+      hasInitializedPositionRef.current = true;
+      
+      if (__DEV__) {
+        console.log(`[InventoryCell] 🌐 Updated global drag state:`, {
+          tileId: tile.id,
+          position: { x: Math.round(draggable.position.x), y: Math.round(draggable.position.y) },
+          gestureAlreadySetPosition,
+          isFirstDragFrame,
+          finalPosition: { 
+            x: Math.round(global.inventoryDragState.position.x), 
+            y: Math.round(global.inventoryDragState.position.y) 
+          },
+        });
+      }
+    } else if (global.inventoryDragState?.tileId === tile.id) {
+      // Сбрасываем при завершении драга
+      global.inventoryDragState.isDragging = false;
+      global.inventoryDragState.tileId = null;
+      hasInitializedPositionRef.current = false;  // ← Сброс для следующего драга
+    }
+  }, [draggable.state, draggable.position.x, draggable.position.y, draggable.width, draggable.height, draggable.rotation, tile.id, initialPosition.x, initialPosition.y]);
+  
+  // ============================================================================
+  // 🔍 ОТЛАДКА: Лог позиции во время драга
+  // ============================================================================
+  useEffect(() => {
+    if (__DEV__ && draggable.state === 'DRAGGING') {
+      console.log(`[InventoryCell] 📍 Drag position:`, {
+        tileId: tile.id,
+        position: { x: Math.round(draggable.position.x), y: Math.round(draggable.position.y) },
+        state: draggable.state,
+      });
+    }
+  }, [draggable.state, draggable.position.x, draggable.position.y, tile.id]);
+  
+  // ============================================================================
+  // РЕНДЕР — ТОЛЬКО СТАТИЧНАЯ ПЛИТКА
+  // ============================================================================
   return (
     <View style={styles.cell}>
-      {draggable?.gesture ? (
-        <GestureDetector gesture={draggable.gesture}>
+      {/* 🔑 FIX: Скрываем статичную плитку при драге через opacity */}
+      <GestureDetector gesture={draggable.gesture}>
+        <View style={{ opacity: draggable.state === 'DRAGGING' ? 0 : 1 }}>
           <TileView
             textureSource={textureSource}
-            position={draggable.position}
-            width={draggable.width}
-            height={draggable.height}
+            position={{ x: 0, y: 0 }}  // (0,0) относительно ячейки
+            width={INVENTORY_CELL_SIZE}
+            height={INVENTORY_CELL_SIZE}
             tileId={tile.id}
-            // ============================================================================
-            // 🔑 КЛЮЧЕВОЕ ИСПРАВЛЕНИЕ #2: Используем tile.rotation вместо draggable.rotation
-            // ============================================================================
-            // tile.rotation — источник правды, обновляется при ре-рендере.
-            // draggable.rotation может быть устаревшим из-за FSM-контекста.
-            // ============================================================================
             rotation={tile.rotation}
-            isInInventory={isInInventory}
+            isInInventory={true}  // relative positioning
+            debugLabel={`InventoryCell[${index}]-static`}
           />
-        </GestureDetector>
-      ) : (
-        // Fallback если жест не создан
-        <TileView
-          textureSource={textureSource}
-          position={initialPosition}
-          width={INVENTORY_CELL_SIZE}
-          height={INVENTORY_CELL_SIZE}
-          tileId={tile.id}
-          rotation={tile.rotation}
-          isInInventory={true}
-        />
-      )}
+        </View>
+      </GestureDetector>
     </View>
   );
 };
@@ -158,7 +229,6 @@ const InventoryCell: React.FC<InventoryCellProps> = ({
 // ============================================================================
 // СТИЛИ
 // ============================================================================
-
 const styles = StyleSheet.create({
   cell: {
     width: INVENTORY_CELL_SIZE,
@@ -170,12 +240,8 @@ const styles = StyleSheet.create({
     marginHorizontal: INVENTORY_CELL_SPACING / 2,
     justifyContent: 'center',
     alignItems: 'center',
-    overflow: 'hidden',
+    overflow: 'visible',
   },
 });
-
-// ============================================================================
-// ЭКСПОРТ
-// ============================================================================
 
 export default InventoryCell;

@@ -56,11 +56,11 @@ export const INVENTORY_DROP_ZONE_TOTAL_HEIGHT =
 
 // Максимальное количество плиток в инвентаре (не считая счётчик)
 // При достижении этого лимита добавление новых плиток блокируется
-export const INVENTORY_MAX_SLOTS = 6;
+export const INVENTORY_MAX_SLOTS = 5;
 
 // Количество слотов, видимых на экране одновременно (включая счётчик)
 // Определяет ширину видимого окна прокрутки
-export const INVENTORY_VISIBLE_SLOTS = 5;
+export const INVENTORY_VISIBLE_SLOTS = 3;
 
 // ============================================================================
 // ЦВЕТА И СТИЛИ

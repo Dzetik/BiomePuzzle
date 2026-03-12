@@ -1,11 +1,6 @@
 // ============================================================================
 // ГОРИЗОНТАЛЬНАЯ ПАНЕЛЬ ИНВЕНТАРЯ ПЛИТОК
 // ============================================================================
-// Этот компонент отображает:
-// - Кнопки прокрутки влево/вправо
-// - Счётчик свободных мест (первый слот)
-// - Видимые плитки в текущем окне прокрутки
-// ============================================================================
 
 import React, { useEffect } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
@@ -27,18 +22,7 @@ import {
   INVENTORY_COUNTER_BORDER_COLOR,
 } from '../constants/inventory';
 
-// ============================================================================
-// КОМПОНЕНТ
-// ============================================================================
-
 const InventoryStrip: React.FC = () => {
-  // ============================================================================
-  // 🔑 КЛЮЧЕВОЕ ИСПРАВЛЕНИЕ #3: Деструктурируем rotationTick
-  // ============================================================================
-  // rotationTick — стабильное useState-значение, которое гарантированно
-  // меняется при любом повороте плитки. Используется в key для гарантированного
-  // ре-рендера компонента при мутации объекта Tile.
-  // ============================================================================
   const {
     freeSlots,
     visibleTiles,
@@ -50,120 +34,79 @@ const InventoryStrip: React.FC = () => {
     scrollRight,
     rotateTile,
     removeTile,
-    rotationTick,  // ← НОВОЕ
+    rotationTick,
   } = useInventory();
 
-  /*useEffect(() => {
+  // ============================================================================
+  // 🔍 ОТЛАДКА: Лог инвентаря
+  // ============================================================================
+  useEffect(() => {
     if (__DEV__) {
-      console.log('[InventoryStrip] 📊 Debug:', {
+      console.log('[InventoryStrip] 📊 State:', {
         totalTiles: tiles.length,
-        visibleTiles: visibleTiles.length,
+        visibleCount: visibleTiles.length,
+        freeSlots,
         scrollOffset,
-        tileIds: tiles.map(t => t.id),
+        rotationTick,
+        tileIds: visibleTiles.map(t => t.id),
       });
     }
-  }, [tiles, visibleTiles, scrollOffset]);*/
+  }, [tiles.length, visibleTiles.length, freeSlots, scrollOffset, rotationTick]); 
   
-  // --------------------------------------------------------------------------
-  // ОБРАБОТЧИК НАЖАТИЯ НА ПЛИТКУ (ПОВОРОТ)
-  // --------------------------------------------------------------------------
   const handleTileTap = (tileId: string) => {
     rotateTile(tileId);
   };
   
-  // --------------------------------------------------------------------------
-  // ОБРАБОТЧИК НАЧАЛА DRAG
-  // --------------------------------------------------------------------------
   const handleTileDragStart = (tileId: string) => {
-    // Плитка удаляется только при успешном размещении (в handlePlaced)
-    // Если нет — вернётся через onReturned
     if (__DEV__) {
-        console.log(`[InventoryStrip] 🎯 Начало драга плитки: ${tileId}`);
+        console.log(`[InventoryStrip] 🎯 Drag start: ${tileId}`);
     }
   };
   
-  // --------------------------------------------------------------------------
-  // РЕНДЕР
-  // --------------------------------------------------------------------------
   return (
-    <View style={styles.container}>
-      {/* ==================================================================== */}
-      {/* КНОПКА ПРОКРУТКИ ВЛЕВО                                              */}
-      {/* ==================================================================== */}
+    <View style={styles.container} pointerEvents="box-none">
       <TouchableOpacity
-        style={[
-          styles.scrollButton,
-          !canScrollLeft && styles.scrollButtonDisabled,
-        ]}
+        style={[styles.scrollButton, !canScrollLeft && styles.scrollButtonDisabled]}
         onPress={scrollLeft}
         disabled={!canScrollLeft}
         activeOpacity={0.7}
       >
-        <Text
-          style={[
-            styles.scrollButtonText,
-            !canScrollLeft && styles.scrollButtonTextDisabled,
-          ]}
-        >
-          ◀
-        </Text>
+        <Text style={[styles.scrollButtonText, !canScrollLeft && styles.scrollButtonTextDisabled]}>◀</Text>
       </TouchableOpacity>
       
-      {/* ==================================================================== */}
-      {/* ОБЛАСТЬ С ПЛИТКАМИ (ВИДИМОЕ ОКНО)                                   */}
-      {/* ==================================================================== */}
       <View style={styles.tilesContainer}>
-        {/* Счётчик свободных мест (всегда первый) */}
         <View style={[styles.cell, styles.counterCell]}>
           <Text style={styles.counterText}>{freeSlots}</Text>
           <Text style={styles.counterLabel}>своб.</Text>
         </View>
         
-        {/* ==================================================================== */}
+        {/* ============================================================================ */}
+        {/* 🔑 FIX: Уникальный ключ — только tile.id + rotationTick */}
+        {/* ============================================================================ */}
         {visibleTiles.map((tile, index) => (
           <InventoryCell
-            key={`${tile.id}-${rotationTick}`}  // ← ИСПРАВЛЕНО: rotationTick вместо tile.rotation
+            key={`${tile.id}-${rotationTick}`}  // ← Убрано tile.rotation из ключа!
             tile={tile}
             index={index}
             onTap={handleTileTap}
             onDragStart={handleTileDragStart}
           />
         ))}
-        
-        {/* Пустые ячейки НЕ рендерятся (в отличие от грида) */}
       </View>
       
-      {/* ==================================================================== */}
-      {/* КНОПКА ПРОКРУТКИ ВПРАВО                                             */}
-      {/* ==================================================================== */}
       <TouchableOpacity
-        style={[
-          styles.scrollButton,
-          !canScrollRight && styles.scrollButtonDisabled,
-        ]}
+        style={[styles.scrollButton, !canScrollRight && styles.scrollButtonDisabled]}
         onPress={scrollRight}
         disabled={!canScrollRight}
         activeOpacity={0.7}
       >
-        <Text
-          style={[
-            styles.scrollButtonText,
-            !canScrollRight && styles.scrollButtonTextDisabled,
-          ]}
-        >
-          ▶
-        </Text>
+        <Text style={[styles.scrollButtonText, !canScrollRight && styles.scrollButtonTextDisabled]}>▶</Text>
       </TouchableOpacity>
     </View>
   );
 };
 
-// ============================================================================
-// СТИЛИ
-// ============================================================================
-
 const styles = StyleSheet.create({
-  // Контейнер всей панели
   container: {
     height: INVENTORY_HEIGHT,
     backgroundColor: INVENTORY_BACKGROUND_COLOR,
@@ -177,9 +120,8 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: -2 },
     shadowOpacity: 0.3,
     shadowRadius: 4,
+    overflow: 'visible', 
   },
-  
-  // Кнопка прокрутки
   scrollButton: {
     width: INVENTORY_SCROLL_BUTTON_SIZE,
     height: INVENTORY_SCROLL_BUTTON_SIZE,
@@ -189,34 +131,24 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginHorizontal: INVENTORY_BUTTON_MARGIN / 2,
   },
-  
-  // Кнопка в неактивном состоянии
   scrollButtonDisabled: {
     backgroundColor: INVENTORY_BUTTON_DISABLED_COLOR,
   },
-  
-  // Текст кнопки
   scrollButtonText: {
     color: INVENTORY_BUTTON_TEXT_COLOR,
     fontSize: 16,
     fontWeight: 'bold',
   },
-  
-  // Текст кнопки в неактивном состоянии
   scrollButtonTextDisabled: {
     color: INVENTORY_BUTTON_DISABLED_TEXT_COLOR,
   },
-  
-  // Контейнер для плиток (видимое окно)
   tilesContainer: {
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'flex-start',
-    overflow: 'hidden',
+    overflow: 'visible',
   },
-  
-  // Ячейка (общий стиль)
   cell: {
     width: 80,
     height: 80,
@@ -226,30 +158,20 @@ const styles = StyleSheet.create({
     marginHorizontal: INVENTORY_CELL_SPACING / 2,
     borderWidth: 2,
   },
-  
-  // Счётчик свободных мест
   counterCell: {
     backgroundColor: INVENTORY_COUNTER_BACKGROUND_COLOR,
     borderColor: INVENTORY_COUNTER_BORDER_COLOR,
   },
-  
-  // Текст счётчика (число)
   counterText: {
     color: INVENTORY_COUNTER_TEXT_COLOR,
     fontSize: 24,
     fontWeight: 'bold',
   },
-  
-  // Текст счётчика (подпись "своб.")
   counterLabel: {
     color: INVENTORY_COUNTER_LABEL_COLOR,
     fontSize: 10,
     marginTop: 2,
   },
 });
-
-// ============================================================================
-// ЭКСПОРТ
-// ============================================================================
 
 export default InventoryStrip;

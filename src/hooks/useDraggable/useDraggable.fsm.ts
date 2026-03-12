@@ -79,7 +79,9 @@ export const useDraggableFSM = (
   const spawnerPosRef = useRef<any>(null);
   
   // Текущая позиция плитки — обновляется ~60 раз в секунду во время драга
-  const positionRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
+  const positionRef = useRef<{ x: number; y: number }>(
+    externalInitialPosition || { x: 0, y: 0 }
+  );
   
   // Начальная позиция драга — для вычисления дельты перемещения
   const dragStartRef = useRef<{ x: number; y: number } | null>(null);
@@ -141,9 +143,9 @@ export const useDraggableFSM = (
   }, [externalInitialPosition]);
 
   // Синхронизируем positionRef с вычисленной позицией
-  useEffect(() => {
+  /*useEffect(() => {
     positionRef.current = { ...stableInitialPosition };
-  }, [stableInitialPosition]);
+  }, [stableInitialPosition]);*/
   
   // --------------------------------------------------------------------------
   // 6. СТАБИЛЬНЫЙ TILE ID
@@ -213,10 +215,6 @@ export const useDraggableFSM = (
       if (initialTileData.id !== lastSyncedTileIdRef.current) {
         send({ type: 'SYNC_TILE', payload: { tile: initialTileData } });
         lastSyncedTileIdRef.current = initialTileData.id;
-        
-        if (__DEV__) {
-          console.log(`[Draggable] 🔧 SYNC_TILE sent: ${initialTileData.id}`);
-        }
       }
     }
   }, [source, initialTileData?.id, send]);
@@ -330,10 +328,10 @@ export const useDraggableFSM = (
   // Машина создаётся один раз, но плитка может появиться позже.
   // Этот эффект обновляет ссылку на экземпляр Tile и tileId в контексте.
   // --------------------------------------------------------------------------
-  useEffect(() => {
+  /*useEffect(() => {
     // Логика синхронизации уже есть в useTileMachine через эффект
     // Здесь можно добавить дополнительные проверки если нужно
-  }, [spawnerTile?.id]);
+  }, [spawnerTile?.id]);*/
 
   // --------------------------------------------------------------------------
   // 13. СБРОС FSM ПРИ СМЕНЕ ПЛИТКИ В ИСТОЧНИКЕ
@@ -352,13 +350,13 @@ export const useDraggableFSM = (
       positionRef.current = { ...stableInitialPosition };
       
       send({ type: 'RESET_TO_SPAWNER' });
-      forceUpdate();
+      //forceUpdate();
       
       if (__DEV__) {
         console.log('[Draggable] 🔄 FSM сброшен для новой плитки:', sourceTileId);
       }
     }
-  }, [spawnerTile?.id, stableInitialPosition, send, source]);
+  }, [spawnerTile?.id, stableInitialPosition, source]);
 
   // --------------------------------------------------------------------------
   // 14. ОТСЛЕЖИВАНИЕ НОВОЙ ПЛИТКИ В ИСТОЧНИКЕ
@@ -373,11 +371,11 @@ export const useDraggableFSM = (
       stableTileId.current = spawnerTile.id;
       positionRef.current = { ...stableInitialPosition };
       if (state === 'SPAWNER_IDLE' || state === 'INVENTORY_IDLE') {
-        send({ type: 'RESET_TO_SPAWNER' });
+        send({ type: 'RESET_TO_SPAWNER' });  // send из замыкания — это ОК
       }
-      forceUpdate();
     }
-  }, [spawnerTile?.id, stableInitialPosition, send]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [spawnerTile?.id, stableInitialPosition]); 
   
   // --------------------------------------------------------------------------
   // 15. ОТСЛЕЖИВАНИЕ ВОЗВРАТА В ИСТОЧНИК

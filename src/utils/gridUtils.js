@@ -45,8 +45,8 @@ export const findNearestCell = (centerX, centerY, scale = 1.0, offsetX = 0, offs
   const baseOffsetX = BASE_GRID_OFFSET.x * scale;
   const baseOffsetY = BASE_GRID_OFFSET.y * scale;
   
-  const gridX = (centerX - offsetX - baseOffsetX) / cellSize;
-  const gridY = (centerY - offsetY - baseOffsetY) / cellSize;
+  const gridX = (centerX + offsetX - baseOffsetX) / cellSize;
+  const gridY = (centerY + offsetY - baseOffsetY) / cellSize;
   
   const col = Math.floor(gridX);
   const row = Math.floor(gridY);

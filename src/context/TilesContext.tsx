@@ -1,11 +1,6 @@
 // ============================================================================
 // КОНТЕКСТ УПРАВЛЕНИЯ ПЛИТКАМИ (с поддержкой инвентаря)
 // ============================================================================
-// Этот контекст хранит всё состояние плиток в приложении:
-// - spawnerTile: активная плитка в спавнере
-// - placedTiles: размещённые на гриде плитки
-// - inventoryTiles: плитки в инвентаре (НОВОЕ)
-// ============================================================================
 
 import React, { createContext, useContext, useState, useCallback, ReactNode } from 'react';
 import { Tile } from '../models/Tile';
@@ -39,7 +34,7 @@ export interface TilesContextType {
   getTileAt: (col: number, row: number) => PlacedTileInfo | undefined;
   getOccupiedBounds: () => { minCol: number; maxCol: number; minRow: number; maxRow: number } | null;
   
-  // Инвентарь (НОВОЕ)
+  // Инвентарь
   inventoryTiles: Tile[];
   addToInventory: (tile: Tile) => boolean;
   removeFromInventory: (tileId: string) => void;
@@ -48,16 +43,20 @@ export interface TilesContextType {
   isInventoryFull: () => boolean;
   getInventoryFreeSlots: () => number;
   clearInventory: () => void;
+  
+  // 🔑 НОВОЕ: Активная плитка (которую тащат)
+  activeInventoryTileId: string | null;
+  setActiveInventoryTileId: (id: string | null) => void;
 }
 
 // ============================================================================
 // КОНСТАНТЫ
 // ============================================================================
 
-const INVENTORY_MAX_SLOTS = 6; // Должно совпадать с inventory.ts
+const INVENTORY_MAX_SLOTS = 6;
 
 // ============================================================================
-// СОЗДАНИЕ КОНТЕКСТА
+// КОНТЕКСТ
 // ============================================================================
 
 const TilesContext = createContext<TilesContextType | undefined>(undefined);
@@ -82,12 +81,24 @@ export const TilesProvider: React.FC<TilesProviderProps> = ({ children }) => {
   const [placedTiles, setPlacedTiles] = useState<Map<string, PlacedTileInfo>>(new Map());
   
   // --------------------------------------------------------------------------
-  // 3. СОСТОЯНИЕ: ИНВЕНТАРЬ (НОВОЕ)
+  // 3. СОСТОЯНИЕ: ИНВЕНТАРЬ
   // --------------------------------------------------------------------------
   const [inventoryTiles, setInventoryTiles] = useState<Tile[]>([]);
   
   // --------------------------------------------------------------------------
-  // 4. МЕТОДЫ: СПАВНЕР
+  // 4. 🔑 НОВОЕ: СОСТОЯНИЕ: АКТИВНАЯ ПЛИТКА ИНВЕНТАРЯ
+  // --------------------------------------------------------------------------
+  const [activeInventoryTileId, setActiveInventoryTileId] = useState<string | null>(null);
+  
+  // ============================================================================
+  // 🔍 ОТЛАДКА: Лог изменений активной плитки
+  // ============================================================================
+  if (__DEV__ && activeInventoryTileId) {
+    console.log(`[TilesContext] 🎯 Active inventory tile:`, activeInventoryTileId);
+  }
+  
+  // --------------------------------------------------------------------------
+  // 5. МЕТОДЫ: СПАВНЕР
   // --------------------------------------------------------------------------
   
   const createSpawnerTile = useCallback((tile?: Tile): Tile => {
@@ -102,7 +113,7 @@ export const TilesProvider: React.FC<TilesProviderProps> = ({ children }) => {
       id: instanceId,
       textureKey: definition.textureKey,
       baseEdges: definition.baseEdges,
-      rotation: 0,  // ← Не используем spread, явно передаём только нужные поля
+      rotation: 0,
     });
     
     setSpawnerTile(newTile);
@@ -118,7 +129,7 @@ export const TilesProvider: React.FC<TilesProviderProps> = ({ children }) => {
   }, []);
   
   // --------------------------------------------------------------------------
-  // 5. МЕТОДЫ: РАЗМЕЩЁННЫЕ ПЛИТКИ
+  // 6. МЕТОДЫ: РАЗМЕЩЁННЫЕ ПЛИТКИ
   // --------------------------------------------------------------------------
   
   const addTile = useCallback((col: number, row: number, tile: Tile) => {
@@ -151,15 +162,10 @@ export const TilesProvider: React.FC<TilesProviderProps> = ({ children }) => {
   }, [placedTiles]);
 
   const isCellOccupied = useCallback((col: number, row: number): boolean => {
-    // Просто инвертируем результат isCellFree
     return !isCellFree(col, row);
   }, [isCellFree]);
 
-  // ============================================================================
-  // Возвращает информацию о плитке в указанной ячейке или undefined.
-  // ============================================================================
   const getTileAt = useCallback((col: number, row: number): PlacedTileInfo | undefined => {
-    // Ищем плитку по координатам в Map
     for (const [key, info] of placedTiles) {
       if (info.col === col && info.row === row) {
         return info;
@@ -168,14 +174,9 @@ export const TilesProvider: React.FC<TilesProviderProps> = ({ children }) => {
     return undefined;
   }, [placedTiles]);
 
-  // ============================================================================
-  // Возвращает минимальные и максимальные координаты занятых ячеек.
-  // Используется для определения области грида которую нужно отрендерить.
-  // ============================================================================
-  
   const getOccupiedBounds = useCallback(() => {
     if (placedTiles.size === 0) {
-      return null;  // Нет плиток — нет границ
+      return null;
     }
     
     let minCol = Infinity;
@@ -194,17 +195,15 @@ export const TilesProvider: React.FC<TilesProviderProps> = ({ children }) => {
   }, [placedTiles]);
   
   // --------------------------------------------------------------------------
-  // 6. МЕТОДЫ: ИНВЕНТАРЬ (НОВОЕ)
+  // 7. МЕТОДЫ: ИНВЕНТАРЬ
   // --------------------------------------------------------------------------
   
   const addToInventory = useCallback((tile: Tile): boolean => {
-    // Проверяем что инвентарь не полон
     if (inventoryTiles.length >= INVENTORY_MAX_SLOTS) {
       console.warn('[TilesContext] ❌ Инвентарь полон, нельзя добавить плитку');
       return false;
     }
     
-    // Добавляем в начало массива (после счётчика)
     setInventoryTiles(prev => [tile, ...prev]);
     return true;
   }, [inventoryTiles.length]);
@@ -237,9 +236,6 @@ export const TilesProvider: React.FC<TilesProviderProps> = ({ children }) => {
   // ============================================================================
   // МЕТОД: ПЕРЕМЕЩЕНИЕ ПЛИТКИ ИЗ СПАВНЕРА В ИНВЕНТАРЬ
   // ============================================================================
-  // Удаляет плитку из спавнера и добавляет в инвентарь.
-  // Возвращает true если успешно, false если инвентарь полон или нет плитки.
-  // ============================================================================
   const moveSpawnerTileToInventory = useCallback((): boolean => {
     if (!spawnerTile) {
       console.warn('[TilesContext] ❌ Нет плитки в спавнере');
@@ -254,14 +250,11 @@ export const TilesProvider: React.FC<TilesProviderProps> = ({ children }) => {
     const tileCopy = new Tile({
       id: spawnerTile.id,
       textureKey: spawnerTile.textureKey,
-      //baseEdges: spawnerTile.baseEdges,  // ← Важно: копируйте edges если есть
     });
 
     (tileCopy as any)._rotation = spawnerTile.rotation; 
     
-    // Добавляем копию в инвентарь
     setInventoryTiles(prev => [tileCopy, ...prev]);
-    // Очищаем спавнер (оригинал больше не нужен)
     setSpawnerTile(null);
     
     console.log(`[TilesContext] ✅ Плитка ${spawnerTile.id} перемещена в инвентарь (копия)`);
@@ -269,7 +262,7 @@ export const TilesProvider: React.FC<TilesProviderProps> = ({ children }) => {
   }, [spawnerTile, inventoryTiles.length]);
   
   // --------------------------------------------------------------------------
-  // 7. ЗНАЧЕНИЕ КОНТЕКСТА
+  // 8. ЗНАЧЕНИЕ КОНТЕКСТА
   // --------------------------------------------------------------------------
   
   const contextValue: TilesContextType = {
@@ -299,6 +292,10 @@ export const TilesProvider: React.FC<TilesProviderProps> = ({ children }) => {
     isInventoryFull,
     getInventoryFreeSlots,
     clearInventory,
+    
+    // 🔑 НОВОЕ: Активная плитка
+    activeInventoryTileId,
+    setActiveInventoryTileId,
   };
   
   return (

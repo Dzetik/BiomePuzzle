@@ -53,15 +53,46 @@ export const createDraggableGestures = ({
   // Преобразует жесты в события FSM через send().
   // --------------------------------------------------------------------------
   const panGesture = Gesture.Pan()
-    // Разрешаем жест только в состояниях, когда плитка может двигаться
     .enabled(state === 'SPAWNER_IDLE' || state === 'INVENTORY_IDLE' || state === 'DRAGGING')
-    // Активируем сразу без задержки для отзывчивости
     .activateAfterLongPress(0)
+    .minDistance(10)
     
     // НАЧАЛО ПЕРЕТАСКИВАНИЯ
     .onStart((e) => {
       // Сохраняем начальную позицию для вычисления дельты
       dragStartRef.current = { ...positionRef.current };
+      
+      // ============================================================================
+      // 🔑 НОВОЕ: Мгновенное обновление global при начале драга (для инвентаря)
+      // ============================================================================
+      if (state === 'INVENTORY_IDLE') {
+        if (!global.inventoryDragState) {
+          global.inventoryDragState = {
+            position: { x: 0, y: 0 },
+            size: { width: 100, height: 100 },
+            rotation: 0,
+            isDragging: false,
+            tileId: null,
+          };
+        }
+        
+        // 🔑 Устанавливаем позицию СРАЗУ (точка касания = центр плитки)
+        global.inventoryDragState.position = {
+          x: e.absoluteX - tileSize / 2,  // Центрируем плитку на пальце
+          y: e.absoluteY - tileSize / 2,
+        };
+        global.inventoryDragState.size = { width: tileSize, height: tileSize };
+        global.inventoryDragState.isDragging = true;
+        // tileId будет установлен в InventoryCell.tsx через useEffect
+        
+        if (__DEV__) {
+          console.log(`[Gesture] 🚀 Instant global update at START:`, {
+            position: global.inventoryDragState.position,
+            touch: { x: e.absoluteX, y: e.absoluteY },
+            tileSize,
+          });
+        }
+      }
       
       // Отправляем событие начала драга в зависимости от источника
       if (state === 'SPAWNER_IDLE') {
@@ -83,6 +114,13 @@ export const createDraggableGestures = ({
       // Обновляем ref для использования в onEnd
       positionRef.current = { x: newX, y: newY };
       
+      // ============================================================================
+      // 🔑 Обновляем global при каждом движении (для инвентаря)
+      // ============================================================================
+      if (global.inventoryDragState?.isDragging) {
+        global.inventoryDragState.position = { x: newX, y: newY };
+      }
+      
       // Отправляем событие перемещения в FSM
       send({ type: 'DRAG_MOVE', payload: { x: newX, y: newY } });
       
@@ -97,7 +135,6 @@ export const createDraggableGestures = ({
         const endPosition = { x: positionRef.current.x, y: positionRef.current.y };
         
         // Вызываем колбэк если есть (логика поиска ячейки, размещения)
-        // Колбэк сам отправит нужные события в FSM
         onDragEnd?.(endPosition);
       }
       
@@ -125,7 +162,7 @@ export const createDraggableGestures = ({
       // Отправляем событие поворота в FSM
       send({ type: 'ROTATE' });
       // Триггерим ре-рендер для обновления визуала (угол поворота)
-      forceUpdate();
+      //forceUpdate();
     });
 
   // --------------------------------------------------------------------------

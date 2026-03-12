@@ -10,10 +10,11 @@ interface TileViewProps {
   position: { x: number; y: number };
   width: number;
   height: number;
-  gesture?: any;  // ← НОВОЕ: жест из gesture-handler
+  gesture?: any;
   tileId: string;
-  rotation?: number;  // ← НОВОЕ: угол поворота
+  rotation?: number;
   isInInventory?: boolean;
+  debugLabel?: string;  // ← Для отладки
 }
 
 const TileView: React.FC<TileViewProps> = ({ 
@@ -25,48 +26,80 @@ const TileView: React.FC<TileViewProps> = ({
   tileId = 'unknown',
   rotation = 0,
   isInInventory = false,
+  debugLabel = '',
 }) => {
   const { offset } = useGrid();
   const { scale } = useZoom();
   
-  const [debugInfo, setDebugInfo] = React.useState({ x: 0, y: 0 });
-  
+  // ============================================================================
+  // 🔍 ОТЛАДКА: Лог рендера с координатами
+  // ============================================================================
   React.useEffect(() => {
-    if (!position || typeof position.x !== 'number') return;
-    setDebugInfo({
-      x: Math.round(position.x),
-      y: Math.round(position.y),
-    });
-  }, [position]);
+    if (__DEV__) {
+      console.log(`[TileView] 🎬 MOUNTED:`, {
+        tileId,
+        debugLabel,
+        isInInventory,
+        position: { x: Math.round(position?.x || 0), y: Math.round(position?.y || 0) },
+        zIndex: isInInventory ? 10000 : 999999,
+      });
+    }
+  }, [tileId, debugLabel, isInInventory, position?.x, position?.y]);
+
+  React.useEffect(() => {
+    if (__DEV__) {
+      console.log(`[TileView] 🎨 Render ${debugLabel}:`, {
+        tileId,
+        isInInventory,
+        position: { x: Math.round(position?.x || 0), y: Math.round(position?.y || 0) },
+        size: { width, height },
+        rotation,
+      });
+    }
+  }, [tileId, isInInventory, position?.x, position?.y, width, height, rotation, debugLabel]);
 
   const tileStyle = {
     position: (isInInventory ? 'relative' : 'absolute') as 'relative' | 'absolute',
     
-    // Абсолютные координаты ТОЛЬКО если не в инвентаре
     ...(!isInInventory && {
-      left: position?.x || 0,
-      top: position?.y || 0,
+      left: typeof position?.x === 'number' ? position.x : 0,
+      top: typeof position?.y === 'number' ? position.y : 0,
     }),
     
     width: typeof width === 'number' ? width : 50,
     height: typeof height === 'number' ? height : 50,
     transform: [{ rotate: `${rotation}deg` }],
     
-    // Центрирование для инвентаря — с as const для каждого значения
     ...(isInInventory && {
-      alignSelf: 'center' as const,  // ← as const для литерала
-      justifyContent: 'center' as const,
-      alignItems: 'center' as const,
+      alignSelf: 'center' as const,
     }),
-  } satisfies StyleProp<ViewStyle>;  // ← satisfies для проверки типа
+    
+    zIndex: 9999, 
+    elevation: 9999,
+  } satisfies StyleProp<ViewStyle>;
+
+  React.useEffect(() => {
+    if (__DEV__ && !isInInventory) {
+      console.log(`[TileView] 🎯 ABSOLUTE RENDER:`, {
+        tileId,
+        screenPos: { x: Math.round(position.x), y: Math.round(position.y) },
+        appliedStyle: { left: position.x, top: position.y },
+      });
+    }
+  }, [tileId, isInInventory, position?.x, position?.y]);
 
   return (
-    // ← НОВОЕ: оборачиваем в GestureDetector если есть жест
     <Animated.View style={[styles.tile, tileStyle]}>
-      <Image source={textureSource} style={styles.image} resizeMode="cover" />
+      <Image 
+        source={textureSource} 
+        style={styles.image} 
+        resizeMode="cover"
+        onLoad={() => __DEV__ && console.log(`[TileView] ✅ Image loaded: ${tileId}`)}
+        onError={(e) => __DEV__ && console.error(`[TileView] ❌ Image error: ${tileId}`, e.nativeEvent?.error)}
+      />
       <View style={styles.debugOverlay}>
         <Text style={styles.debugText}>{tileId}</Text>
-        <Text style={styles.debugTextSmall}>{debugInfo.x},{debugInfo.y}</Text>
+        <Text style={styles.debugTextSmall}>{Math.round(position?.x || 0)},{Math.round(position?.y || 0)}</Text>
         <Text style={styles.debugTextSmall}>🔄 {rotation}°</Text>
       </View>
     </Animated.View>

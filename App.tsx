@@ -1,49 +1,47 @@
 // ========================================
-// ГЛАВНЫЙ ФАЙЛ ПРИЛОЖЕНИЯ - FSM INTEGRATION
+// ГЛАВНЫЙ ФАЙЛ ПРИЛОЖЕНИЯ (ИСПРАВЛЕННЫЙ)
 // ========================================
 import React, { useEffect, useState, useCallback, useMemo, useRef } from 'react';
-import { View, StyleSheet, StatusBar } from 'react-native';
+import { View, StyleSheet, StatusBar, LogBox, Dimensions } from 'react-native';
 import { GestureHandlerRootView, GestureDetector, Gesture } from 'react-native-gesture-handler';
 
-// Компоненты
 import TileView from './src/components/TileView';
 import GridView from './src/components/GridView';
 import SpawnerCellView from './src/components/SpawnerCellView';
+import InventoryStrip from './src/components/InventoryStrip';
 
-// Хуки
 import useDraggable from './src/hooks/useDraggable';
 import { useZoom, ZoomProvider } from './src/hooks/useZoom';
 import { useGrid } from './src/context/GridContext';
 import { useSpawner } from './src/hooks/useSpawner';
-
-// Контексты
 import { TilesProvider, useTiles } from './src/context/TilesContext';
 import { GridProvider } from './src/context/GridContext';
 
-// Утилиты и константы
 import { getSpawnerSize } from './src/constants/spawner';
 import { DEFAULT_TILE_SIZE } from './src/constants/tile';
+import { INVENTORY_CELL_SIZE, INVENTORY_CELL_SPACING } from './src/constants/inventory';
 import { SpawnerService } from './src/services/SpawnerService';
 import { getSnapToCellPosition } from './src/utils/gridUtils';
-
 import { TEXTURE_MAP, DEFAULT_TEXTURE } from './src/constants/textures';
-import { Tile } from './src/models/Tile';
 import { TileState } from './src/state';
-import InventoryStrip from './src/components/InventoryStrip';
 
 import { INVENTORY_DROP_ZONE_TOTAL_HEIGHT, INVENTORY_DROP_ZONE_PADDING_BOTTOM } from './src/constants/inventory';
 
-const testTexture = require('./assets/images/textures/test1.png');
+if (__DEV__) {
+  LogBox.ignoreLogs([
+    /Maximum update depth exceeded/,
+    /Encountered two children with the same key/,
+  ]);
+}
 
 // ========================================
-// Компонент с жестом зума
+// ZoomHandler
 // ========================================
-const ZoomHandler = ({ children }: { children: React.ReactNode }) => {
+const ZoomHandler = ({ children }) => {
   const { scale, setScale, MIN_SCALE, MAX_SCALE } = useZoom();
   const pinchGesture = Gesture.Pinch().onUpdate((event) => {
     const newScale = scale * event.scale;
-    const clampedScale = Math.min(MAX_SCALE, Math.max(MIN_SCALE, newScale));
-    setScale(clampedScale);
+    setScale(Math.min(MAX_SCALE, Math.max(MIN_SCALE, newScale)));
   });
   return (
     <GestureDetector gesture={pinchGesture}>
@@ -53,31 +51,24 @@ const ZoomHandler = ({ children }: { children: React.ReactNode }) => {
 };
 
 // ========================================
-// Размещённые плитки (рендерятся из контекста)
+// PlacedTiles
 // ========================================
 const PlacedTiles = () => {
   const { getAllTiles } = useTiles();
   const { scale } = useZoom();
   const { offset } = useGrid();
-  
-  const tiles = getAllTiles(); // Возвращает PlacedTileInfo[]
+  const tiles = getAllTiles();
 
   return (
     <>
       {tiles.map((entry) => {
-        const tile = entry.tile; // ← ЭКЗЕМПЛЯР Tile
+        const tile = entry.tile;
         const cellSize = DEFAULT_TILE_SIZE.width;
-        
         const position = getSnapToCellPosition(
           { width: cellSize * scale, height: cellSize * scale },
-          entry.col,
-          entry.row,
-          scale,
-          offset?.x || 0,
-          offset?.y || 0
+          entry.col, entry.row, scale,
+          offset?.x || 0, offset?.y || 0
         );
-
-        // ← Получаем текстуру из маппинга
         const textureSource = TEXTURE_MAP[tile.textureKey] || DEFAULT_TEXTURE;
 
         return (
@@ -88,8 +79,8 @@ const PlacedTiles = () => {
             width={cellSize * scale}
             height={cellSize * scale}
             tileId={tile.id}
-            rotation={tile.rotation}  // ← НОВОЕ: поворот для размещённых плиток
-            // ← НЕ передаём gesture/panHandlers — размещённые плитки не интерактивны
+            rotation={tile.rotation}
+            debugLabel={`Placed[${entry.col},${entry.row}]`}
           />
         );
       })}
@@ -98,31 +89,47 @@ const PlacedTiles = () => {
 };
 
 // ========================================
-// Основной игровой контент
+// GameContent — ИСПРАВЛЕННЫЙ (с useState для синхронизации)
 // ========================================
 const GameContent = () => {
-  // ============================================================================
-  // 🔥 ИМПОРТ ИЗ КОНТЕКСТА (все методы деструктурируются здесь, на верхнем уровне)
-  // ============================================================================
+  // 🔑 ВСЕ ХУКИ — СТРОГО НА ВЕРХНЕМ УРОВНЕ
   const { 
     getSpawnerTile, 
     createSpawnerTile, 
-    moveSpawnerTileToInventory, 
+    moveSpawnerTileToInventory,
+    activeInventoryTileId,
+    getInventoryTile,
+    setActiveInventoryTileId,
     inventoryTiles,
-    removeFromInventory  // ← НОВОЕ: для удаления при размещении из инвентаря
   } = useTiles();
   
   const spawnerPos = useSpawner();
   const { offset } = useGrid();
   const [isInitialized, setIsInitialized] = useState(false);
-
-  const activeTileIdRef = useRef<string | null>(null);
+  const activeTileIdRef = useRef(null);
   const hasActiveTileRef = useRef(false);
 
-  // Инициализация первой плитки в спавнере
+  // ============================================================================
+  // 🔑 НОВОЕ: State для синхронизации плавающей плитки (вместо ref!)
+  // ============================================================================
+  const [floatingTileState, setFloatingTileState] = useState<{
+    position: { x: number; y: number };
+    size: { width: number; height: number };
+    rotation: number;
+    isDragging: boolean;
+    tileId: string | null;
+  }>({
+    position: { x: 0, y: 0 },
+    size: { width: 100, height: 100 },
+    rotation: 0,
+    isDragging: false,
+    tileId: null,
+  });
+
+  // Инициализация спавнера
   useEffect(() => {
     if (spawnerPos?.size > 0 && !isInitialized) {
-      console.log('[App] 🟢 Инициализация спавнера');
+      console.log('[App] 🟢 Init spawner');
       const tile = createSpawnerTile();
       if (tile?.id) {
         activeTileIdRef.current = tile.id;
@@ -141,107 +148,96 @@ const GameContent = () => {
     }
   }, [spawnerTile?.id]);
 
-  // Вычисление начальной позиции плитки
   const getInitialPosition = useCallback(() => {
     if (spawnerPos?.size > 0) {
       const spawnerSize = getSpawnerSize();
-      const initialTileSize = { width: spawnerSize, height: spawnerSize };
-      return SpawnerService.getTilePosition(initialTileSize, spawnerPos);
+      return SpawnerService.getTilePosition(
+        { width: spawnerSize, height: spawnerSize },
+        spawnerPos
+      );
     }
     return { x: 0, y: 0 };
   }, [spawnerPos]);
 
   const initialPosition = useMemo(() => getInitialPosition(), [getInitialPosition, spawnerTile?.id]); 
 
-  // ============================================================================
-  // 🔥 КОЛБЭК ПРИ РАЗМЕЩЕНИИ ПЛИТКИ (на грид)
-  // ============================================================================
-  // ВАЖНО: Сигнатура должна быть (cell) => void, как ожидает useDraggable
-  // Удаление из инвентаря происходит в InventoryCell, не здесь!
-  // ============================================================================
-  const handleTilePlaced = useCallback((cell: { col: number; row: number }) => {
-    console.log('🔥 [1] handleTilePlaced START');
-    
-    // ← Удаление из инвентаря НЕ здесь — это делает InventoryCell.tsx!
-    // Здесь только создаём новую плитку в спавнере
-    
+  const handleTilePlaced = useCallback((cell) => {
+    console.log('🔥 [1] handleTilePlaced');
     const newTile = createSpawnerTile();
-    console.log('🔥 [2] createSpawnerTile вернул:', newTile?.id);
     if (newTile?.id) {
       activeTileIdRef.current = newTile.id;
-      console.log('🔥 [3] activeTileIdRef обновлён');
+      console.log('🔥 [2] New spawner tile:', newTile.id);
     }
-  }, [createSpawnerTile]);  // ← Только createSpawnerTile в зависимостях
+  }, [createSpawnerTile]);
 
-  // ============================================================================
-  // 🔥 КОЛБЭК: ПЛИТКА СБРОШЕНА В ИНВЕНТАРЬ
-  // ============================================================================
-  // Вызывается когда пользователь отпускает плитку из спавнера над зоной инвентаря.
-  // Перемещает плитку из спавнера в инвентарь и создаёт новую в спавнере.
-  // ============================================================================
-  const handleDroppedInInventory = useCallback((): boolean => {  // ← Возвращаем boolean
-    if (__DEV__) {
-      console.log('[App] 📦 Плитка сброшена в инвентарь');
-    }
-    
+  const handleDroppedInInventory = useCallback(() => {
+    if (__DEV__) console.log('[App] 📦 Dropped to inventory');
     const success = moveSpawnerTileToInventory();
-    
     if (success) {
-      if (__DEV__) {
-        console.log('[App] ✅ Плитка добавлена в инвентарь');
-      }
-      // Создаём новую плитку в спавнере
+      if (__DEV__) console.log('[App] ✅ Added to inventory');
       const newTile = createSpawnerTile();
-      if (newTile?.id) {
-        activeTileIdRef.current = newTile.id;
-      }
-      return true;  // ← Возвращаем успех
+      if (newTile?.id) activeTileIdRef.current = newTile.id;
+      return true;
     } else {
-      if (__DEV__) {
-        console.log('[App] ❌ Инвентарь полон, плитка не добавлена');
-      }
-      // НЕ создаём новую плитку — старая остаётся в спавнере
-      return false;  // ← Возвращаем провал
+      if (__DEV__) console.log('[App] ❌ Inventory full');
+      return false;
     }
   }, [moveSpawnerTileToInventory, createSpawnerTile]);
 
-  // ============================================================================
-  // 🔥 🔥 🔥 КЛЮЧЕВОЕ: Объявление draggableTile для спавнера
-  // ============================================================================
-  // Для инвентаря будет отдельный экземпляр в InventoryCell
-  // ============================================================================
+  // useDraggable для спавнера
   const draggableTile = useDraggable(
     spawnerTile,
     spawnerTile?.id || null, 
     initialPosition,
-    handleTilePlaced,           // onPlaced: размещение на гриде
-    undefined,                  // onReturned: пока не используется
-    'SPAWNER',                  // source
-    handleDroppedInInventory    // onDroppedInInventory: сброс в инвентарь
+    handleTilePlaced,
+    undefined,
+    'SPAWNER',
+    handleDroppedInInventory
   );
 
   // ============================================================================
-  // 🔥 Отладочное логирование (только смена состояния)
+  // 🔑 Активная плитка инвентаря
   // ============================================================================
-  const prevStateRef = useRef<TileState | null>(null);
+  const activeInventoryTile = activeInventoryTileId ? getInventoryTile(activeInventoryTileId) : null;
+  
+  // ============================================================================
+  // 🔑 НОВОЕ: Синхронизация с global через setInterval (polling)
+  // ============================================================================
+  // useEffect на ref не работает, поэтому используем polling для синхронизации
+  // ============================================================================
   useEffect(() => {
-    if (draggableTile?.state !== prevStateRef.current) {
-      console.log('[App] 🎮 FSM State:', draggableTile?.state);
-      prevStateRef.current = draggableTile?.state;
-
-      if (draggableTile?.state === 'PLACED') {
-        console.log('[App] ✅ Tile placed:', draggableTile?.debug?.currentCell);
+    const syncInterval = setInterval(() => {
+      if (global.inventoryDragState && global.inventoryDragState.tileId === activeInventoryTileId) {
+        setFloatingTileState({
+          position: { ...global.inventoryDragState.position },
+          size: { ...global.inventoryDragState.size },
+          rotation: global.inventoryDragState.rotation,
+          isDragging: global.inventoryDragState.isDragging,
+          tileId: global.inventoryDragState.tileId,
+        });
+      } else if (floatingTileState.isDragging && floatingTileState.tileId !== activeInventoryTileId) {
+        // Сброс если плитка больше не активна
+        setFloatingTileState(prev => ({ ...prev, isDragging: false, tileId: null }));
       }
-
-      if (draggableTile?.state === 'SPAWNER_IDLE' && draggableTile?.isInSpawner) {
-        console.log('[App] ✅ Tile is ACTIVE in spawner, ready for drag');
-      }
+    }, 16); // ~60 FPS
+    
+    return () => clearInterval(syncInterval);
+  }, [activeInventoryTileId, floatingTileState.isDragging, floatingTileState.tileId]);
+  
+  // ============================================================================
+  // 🔍 ОТЛАДКА: Лог плавающей плитки
+  // ============================================================================
+  useEffect(() => {
+    if (__DEV__ && floatingTileState.isDragging && floatingTileState.tileId) {
+      console.log(`[App] 🎯 Floating inventory tile:`, {
+        tileId: floatingTileState.tileId,
+        position: { x: Math.round(floatingTileState.position.x), y: Math.round(floatingTileState.position.y) },
+        size: floatingTileState.size,
+        isDragging: floatingTileState.isDragging,
+      });
     }
-  }, [draggableTile?.state, draggableTile?.debug, draggableTile?.isInSpawner]);
+  }, [floatingTileState.position.x, floatingTileState.position.y, floatingTileState.isDragging, floatingTileState.tileId]);
 
-  // ============================================================================
-  // 🔥 Показываем активную плитку ТОЛЬКО когда она не размещена
-  // ============================================================================
   const shouldRenderActiveTile =
     hasActiveTileRef.current && 
     draggableTile?.position?.x !== undefined && 
@@ -249,37 +245,17 @@ const GameContent = () => {
     draggableTile?.state !== 'PLACED' &&
     spawnerTile !== null;
 
-  useEffect(() => {
-    if (__DEV__) {
-      /*console.log('[App] 🔍 shouldRenderActiveTile DEBUG:', {
-        hasActiveTileRef: hasActiveTileRef.current,
-        position: draggableTile?.position,
-        state: draggableTile?.state,
-        spawnerTileId: spawnerTile?.id,
-        shouldRender: shouldRenderActiveTile,
-      });*/
-    }
-  }, [
-    hasActiveTileRef.current,
-    draggableTile?.position,
-    draggableTile?.state,
-    spawnerTile?.id,
-    shouldRenderActiveTile,
-  ]);
-
   // ============================================================================
   // РЕНДЕР
   // ============================================================================
   return (
     <View style={styles.gameContainer}>
-      {/* GridView и SpawnerCellView для инициализации контекстов */}
       <GridView />
       <SpawnerCellView />
-      
-      {/* Размещённые плитки из контекста */}
       <PlacedTiles />
+      <InventoryStrip />
 
-      {/* Активная плитка из спавнера (только если не PLACED) */}
+      {/* Плитка спавнера */}
       {shouldRenderActiveTile && spawnerTile && draggableTile?.gesture && (
         <GestureDetector gesture={draggableTile.gesture}>
           <TileView
@@ -289,20 +265,29 @@ const GameContent = () => {
             height={draggableTile.height}
             tileId={spawnerTile.id}
             rotation={spawnerTile?.rotation ?? 0}
+            debugLabel="SpawnerActive"
           />
         </GestureDetector>
       )}
-
-      {/* ================================================================== */}
-      {/* ИНВЕНТАРЬ (НОВОЕ)                                                  */}
-      {/* ================================================================== */}
-      <InventoryStrip />
+      
+      {/* 🔑 Плитка инвентаря — рендерится через state (триггерит ре-рендер!) */}
+      {floatingTileState.isDragging && floatingTileState.tileId && activeInventoryTile && (
+        <TileView
+          textureSource={TEXTURE_MAP[activeInventoryTile.textureKey] || DEFAULT_TEXTURE}
+          position={floatingTileState.position}
+          width={floatingTileState.size.width}
+          height={floatingTileState.size.height}
+          tileId={floatingTileState.tileId}
+          rotation={floatingTileState.rotation}
+          isInInventory={false}
+          debugLabel="InventoryFloating"
+        />
+      )}
     </View>
   );
 };
-
 // ========================================
-// Корневой компонент App
+// App
 // ========================================
 const App = () => {
   return (
@@ -322,12 +307,14 @@ const App = () => {
 };
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
+  container: { 
+    flex: 1, 
     backgroundColor: '#1a1a1a',
+    overflow: 'visible',
   },
-  gameContainer: {
+  gameContainer: { 
     flex: 1,
+    overflow: 'visible',
   },
 });
 
