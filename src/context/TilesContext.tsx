@@ -5,6 +5,7 @@
 import React, { createContext, useContext, useState, useCallback, ReactNode } from 'react';
 import { Tile } from '../models/Tile';
 import { getRandomTileDefinition } from '../data/tileDefinitions';
+import { INVENTORY_MAX_SLOTS } from '../constants/inventory';
 
 // ============================================================================
 // ТИПЫ
@@ -48,12 +49,6 @@ export interface TilesContextType {
   activeInventoryTileId: string | null;
   setActiveInventoryTileId: (id: string | null) => void;
 }
-
-// ============================================================================
-// КОНСТАНТЫ
-// ============================================================================
-
-const INVENTORY_MAX_SLOTS = 6;
 
 // ============================================================================
 // КОНТЕКСТ
@@ -226,7 +221,7 @@ export const TilesProvider: React.FC<TilesProviderProps> = ({ children }) => {
   }, [inventoryTiles.length]);
   
   const getInventoryFreeSlots = useCallback(() => {
-    return INVENTORY_MAX_SLOTS - inventoryTiles.length;
+    return Math.max(0, INVENTORY_MAX_SLOTS - inventoryTiles.length);
   }, [inventoryTiles.length]);
   
   const clearInventory = useCallback(() => {

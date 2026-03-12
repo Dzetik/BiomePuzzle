@@ -74,8 +74,8 @@ const TileView: React.FC<TileViewProps> = ({
       alignSelf: 'center' as const,
     }),
     
-    zIndex: 9999, 
-    elevation: 9999,
+    zIndex: isInInventory ? 10000 : (debugLabel?.includes('Placed') ? 100 : 999999),
+    elevation: isInInventory ? 10000 : (debugLabel?.includes('Placed') ? 100 : 999999),
   } satisfies StyleProp<ViewStyle>;
 
   React.useEffect(() => {
