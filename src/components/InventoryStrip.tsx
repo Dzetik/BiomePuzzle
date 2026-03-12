@@ -130,14 +130,17 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     marginHorizontal: INVENTORY_BUTTON_MARGIN / 2,
+    overflow: 'visible', 
   },
   scrollButtonDisabled: {
     backgroundColor: INVENTORY_BUTTON_DISABLED_COLOR,
+    overflow: 'visible', 
   },
   scrollButtonText: {
     color: INVENTORY_BUTTON_TEXT_COLOR,
     fontSize: 16,
     fontWeight: 'bold',
+    overflow: 'visible', 
   },
   scrollButtonTextDisabled: {
     color: INVENTORY_BUTTON_DISABLED_TEXT_COLOR,
@@ -157,20 +160,24 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginHorizontal: INVENTORY_CELL_SPACING / 2,
     borderWidth: 2,
+    overflow: 'visible', 
   },
   counterCell: {
     backgroundColor: INVENTORY_COUNTER_BACKGROUND_COLOR,
     borderColor: INVENTORY_COUNTER_BORDER_COLOR,
+    overflow: 'visible', 
   },
   counterText: {
     color: INVENTORY_COUNTER_TEXT_COLOR,
     fontSize: 24,
     fontWeight: 'bold',
+    overflow: 'visible', 
   },
   counterLabel: {
     color: INVENTORY_COUNTER_LABEL_COLOR,
     fontSize: 10,
     marginTop: 2,
+    overflow: 'visible', 
   },
 });
 

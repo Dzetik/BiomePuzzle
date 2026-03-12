@@ -300,6 +300,7 @@ export const useDraggableFSM = (
     forceUpdate,
     tileSize,
     scaleRef,
+    animated,
     onDragEnd: handleDragEnd,
   });
 

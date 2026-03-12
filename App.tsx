@@ -1,5 +1,5 @@
 // ========================================
-// ГЛАВНЫЙ ФАЙЛ ПРИЛОЖЕНИЯ (ИСПРАВЛЕННЫЙ)
+// ГЛАВНЫЙ ФАЙЛ ПРИЛОЖЕНИЯ (ИСПРАВЛЕННЫЙ — Вариант А)
 // ========================================
 import React, { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { View, StyleSheet, StatusBar, LogBox, Dimensions } from 'react-native';
@@ -89,18 +89,15 @@ const PlacedTiles = () => {
 };
 
 // ========================================
-// GameContent — ИСПРАВЛЕННЫЙ (с useState для синхронизации)
+// GameContent — ФИНАЛЬНАЯ ВЕРСИЯ (с setInterval для ре-рендера)
 // ========================================
 const GameContent = () => {
-  // 🔑 ВСЕ ХУКИ — СТРОГО НА ВЕРХНЕМ УРОВНЕ
   const { 
     getSpawnerTile, 
     createSpawnerTile, 
     moveSpawnerTileToInventory,
     activeInventoryTileId,
     getInventoryTile,
-    setActiveInventoryTileId,
-    inventoryTiles,
   } = useTiles();
   
   const spawnerPos = useSpawner();
@@ -110,21 +107,9 @@ const GameContent = () => {
   const hasActiveTileRef = useRef(false);
 
   // ============================================================================
-  // 🔑 НОВОЕ: State для синхронизации плавающей плитки (вместо ref!)
+  // 🔑 State для триггера ре-рендера при драге инвентаря
   // ============================================================================
-  const [floatingTileState, setFloatingTileState] = useState<{
-    position: { x: number; y: number };
-    size: { width: number; height: number };
-    rotation: number;
-    isDragging: boolean;
-    tileId: string | null;
-  }>({
-    position: { x: 0, y: 0 },
-    size: { width: 100, height: 100 },
-    rotation: 0,
-    isDragging: false,
-    tileId: null,
-  });
+  const [inventoryDragTick, setInventoryDragTick] = useState(0);
 
   // Инициализация спавнера
   useEffect(() => {
@@ -199,44 +184,19 @@ const GameContent = () => {
   // 🔑 Активная плитка инвентаря
   // ============================================================================
   const activeInventoryTile = activeInventoryTileId ? getInventoryTile(activeInventoryTileId) : null;
-  
+
   // ============================================================================
-  // 🔑 НОВОЕ: Синхронизация с global через setInterval (polling)
-  // ============================================================================
-  // useEffect на ref не работает, поэтому используем polling для синхронизации
+  // 🔑 setInterval для ре-рендера при драге инвентаря
   // ============================================================================
   useEffect(() => {
-    const syncInterval = setInterval(() => {
-      if (global.inventoryDragState && global.inventoryDragState.tileId === activeInventoryTileId) {
-        setFloatingTileState({
-          position: { ...global.inventoryDragState.position },
-          size: { ...global.inventoryDragState.size },
-          rotation: global.inventoryDragState.rotation,
-          isDragging: global.inventoryDragState.isDragging,
-          tileId: global.inventoryDragState.tileId,
-        });
-      } else if (floatingTileState.isDragging && floatingTileState.tileId !== activeInventoryTileId) {
-        // Сброс если плитка больше не активна
-        setFloatingTileState(prev => ({ ...prev, isDragging: false, tileId: null }));
+    const interval = setInterval(() => {
+      if (global.inventoryDragState?.isDragging) {
+        setInventoryDragTick(t => t + 1);
       }
-    }, 16); // ~60 FPS
+    }, 16);
     
-    return () => clearInterval(syncInterval);
-  }, [activeInventoryTileId, floatingTileState.isDragging, floatingTileState.tileId]);
-  
-  // ============================================================================
-  // 🔍 ОТЛАДКА: Лог плавающей плитки
-  // ============================================================================
-  useEffect(() => {
-    if (__DEV__ && floatingTileState.isDragging && floatingTileState.tileId) {
-      console.log(`[App] 🎯 Floating inventory tile:`, {
-        tileId: floatingTileState.tileId,
-        position: { x: Math.round(floatingTileState.position.x), y: Math.round(floatingTileState.position.y) },
-        size: floatingTileState.size,
-        isDragging: floatingTileState.isDragging,
-      });
-    }
-  }, [floatingTileState.position.x, floatingTileState.position.y, floatingTileState.isDragging, floatingTileState.tileId]);
+    return () => clearInterval(interval);
+  }, []);
 
   const shouldRenderActiveTile =
     hasActiveTileRef.current && 
@@ -270,15 +230,18 @@ const GameContent = () => {
         </GestureDetector>
       )}
       
-      {/* 🔑 Плитка инвентаря — рендерится через state (триггерит ре-рендер!) */}
-      {floatingTileState.isDragging && floatingTileState.tileId && activeInventoryTile && (
+      {/* ============================================================================ */}
+      {/* 🔑 Плитка инвентаря — рендерится с inventoryDragTick */}
+      {/* ============================================================================ */}
+      {activeInventoryTile && global.inventoryDragState?.isDragging && (
         <TileView
+          key={`inventory-floating-${inventoryDragTick}`}
           textureSource={TEXTURE_MAP[activeInventoryTile.textureKey] || DEFAULT_TEXTURE}
-          position={floatingTileState.position}
-          width={floatingTileState.size.width}
-          height={floatingTileState.size.height}
-          tileId={floatingTileState.tileId}
-          rotation={floatingTileState.rotation}
+          position={global.inventoryDragState.position}
+          width={INVENTORY_CELL_SIZE}
+          height={INVENTORY_CELL_SIZE}
+          tileId={activeInventoryTile.id}
+          rotation={global.inventoryDragState.rotation || 0}
           isInInventory={false}
           debugLabel="InventoryFloating"
         />
@@ -286,6 +249,7 @@ const GameContent = () => {
     </View>
   );
 };
+
 // ========================================
 // App
 // ========================================
