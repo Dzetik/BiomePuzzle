@@ -1,63 +1,46 @@
 // ============================================================================
-// СЕРВИС КРАФТА — ЯДРО ЛОГИКИ
+// СЕРВИС КРАФТА — ПРОВЕРКА И ВЫПОЛНЕНИЕ РЕЦЕПТОВ
 // ============================================================================
-// Отвечает за:
-// - Поиск подходящего рецепта при размещении плитки
-// - Валидацию цепочки через активные стороны плиток
-// - Выполнение крафта (удаление ингредиентов + создание результата)
-// - Рекурсивную проверку цепочек (результат → новый стартер)
-// ============================================================================
-// ВАЖНО: Сервис не зависит от React/FSM — только данные и правила.
-// Интеграция с приложением происходит через хук useCrafting.
+// Отвечает за поиск подходящих рецептов и выполнение крафта.
+// Использует цепочки плиток соединённых через activeSide.
 // ============================================================================
 
+import { Recipe, RECIPES, getRecipesWithLastIngredient } from '../constants/recipes';
 import { Tile } from '../models/Tile';
-import { Edge } from '../models/Tile.types';
-import { Recipe, getRecipesWithLastIngredient, getRecipesWhereTextureIsNotLast } from '../constants/recipes';
 import { PlacedTileInfo } from '../context/TilesContext';
+import { Edge } from '../models/Tile.types';
+import { CRAFTING_CONFIG } from '../constants/CraftingConfig';
 
 // ============================================================================
 // ТИПЫ
 // ============================================================================
 
-/**
- * Результат поиска цепочки для рецепта
- */
-export interface ChainMatch {
-  recipe: Recipe;
-  matchedTiles: MatchedTile[];  // Плитки в порядке последовательности рецепта
-  resultPosition: { col: number; row: number };  // Где появится результат
-}
-
-/**
- * Плитка с дополнительной информацией о её позиции в цепочке
- */
 export interface MatchedTile {
   tile: Tile;
   col: number;
   row: number;
-  sequenceIndex: number;  // Позиция в recipe.sequence (0, 1, 2...)
+  sequenceIndex: number;
 }
 
-/**
- * Результат выполнения крафта
- */
+export interface ChainMatch {
+  recipe: Recipe;
+  matchedTiles: MatchedTile[];
+  resultPosition: { col: number; row: number };
+}
+
 export interface CraftResult {
   success: boolean;
-  recipeId?: string;
-  removedTileIds: string[];  // ID удалённых ингредиентов
-  createdTile?: {  // Если крафт успешен
+  recipeId: string;
+  removedTileIds: string[];
+  createdTile: {
     tile: Tile;
     col: number;
     row: number;
-  };
-  chainContinues: boolean;  // Нужно ли проверять цепочку дальше
-  message?: string;  // Для отладки
+  } | null;
+  chainContinues: boolean;
+  message: string;
 }
 
-/**
- * Колбэки для внешней логики (опционально)
- */
 export interface CraftingCallbacks {
   onCraftStart?: (recipe: Recipe, matchedTiles: MatchedTile[]) => void;
   onCraftComplete?: (result: CraftResult) => void;
@@ -69,123 +52,97 @@ export interface CraftingCallbacks {
 // ============================================================================
 
 /**
- * Получить направление от ячейки A к ячейке B
- * Возвращает Edge или null если ячейки не являются соседями
+ * Получить позиции 4 соседей ячейки
  */
-const getDirectionFromTo = (
-  fromCol: number, fromRow: number,
-  toCol: number, toRow: number
-): Edge | null => {
-  const dx = toCol - fromCol;
-  const dy = toRow - fromRow;
-  
-  // Соседи только если разница ровно 1 по одной оси и 0 по другой
-  if (dx === 1 && dy === 0) return 'right';
-  if (dx === -1 && dy === 0) return 'left';
-  if (dx === 0 && dy === 1) return 'bottom';
-  if (dx === 0 && dy === -1) return 'top';
-  
-  return null;  // Не соседи
-};
-
-/**
- * Проверить: указывает ли activeSide плитки НА целевую ячейку
- * Пример: плитка на (5,5) с activeSide="right" указывает на (6,5)
- */
-const doesActiveSidePointTo = (
-  tile: Tile,
-  tileCol: number, tileRow: number,
-  targetCol: number, targetRow: number
-): boolean => {
-  // Если у плитки нет activeSide — она не может участвовать в упорядоченных рецептах
-  const activeSide = (tile as any).activeSide as Edge | undefined;
-  if (!activeSide) return false;
-  
-  // Вычисляем куда "смотрит" activeSide
-  let expectedTargetCol = tileCol;
-  let expectedTargetRow = tileRow;
-  
-  switch (activeSide) {
-    case 'top': expectedTargetRow--; break;
-    case 'bottom': expectedTargetRow++; break;
-    case 'left': expectedTargetCol--; break;
-    case 'right': expectedTargetCol++; break;
-  }
-  
-  // Сравниваем с целевой позицией
-  return expectedTargetCol === targetCol && expectedTargetRow === targetRow;
-};
-
-/**
- * Получить соседние ячейки в порядке приоритета (для детерминированного поиска)
- */
-const getNeighborPositions = (col: number, row: number): Array<{ col: number; row: number; direction: Edge }> => {
+function getNeighborPositions(col: number, row: number): { col: number; row: number }[] {
   return [
-    { col: col + 1, row, direction: 'right' },
-    { col: col - 1, row, direction: 'left' },
-    { col, row: row + 1, direction: 'bottom' },
-    { col, row: row - 1, direction: 'top' },
+    { col: col - 1, row },  // left
+    { col: col + 1, row },  // right
+    { col, row: row - 1 },  // top
+    { col, row: row + 1 },  // bottom
   ];
-};
+}
 
 // ============================================================================
-// КЛАСС СЕРВИСА
+// КЛАСС CRAFTING SERVICE
 // ============================================================================
 
 export class CraftingService {
   
-  // --------------------------------------------------------------------------
-  // ПУБЛИЧНЫЙ МЕТОД: Проверка рецепта при размещении плитки
-  // --------------------------------------------------------------------------
-  /**
-   * Вызывается после размещения плитки на гриде.
-   * Ищет рецепт где размещённая плитка — последний ингредиент.
-   * 
-   * @param placedTile - только что размещённая плитка
-   * @param col, row - координаты размещения
-   * @param getTileAt - функция получения плитки по координатам (из TilesContext)
-   * @returns ChainMatch | null
-   */
-  static findMatchingRecipe(
+  // ============================================================================
+  // ПУБЛИЧНЫЙ МЕТОД: Полная обработка размещения плитки
+  // ============================================================================
+  static onTilePlaced(
     placedTile: Tile,
     col: number,
     row: number,
-    getTileAt: (col: number, row: number) => PlacedTileInfo | undefined
-  ): ChainMatch | null {
-    // 1. Получить все рецепты где placedTile.textureKey — последний шаг
-    const candidateRecipes = getRecipesWithLastIngredient(placedTile.textureKey);
-    if (candidateRecipes.length === 0) {
-      if (__DEV__) console.log(`[Crafting] Нет рецептов где "${placedTile.textureKey}" — последний шаг`);
-      return null;
+    getTileAt: (col: number, row: number) => PlacedTileInfo | undefined,
+    tileOperations: {
+      removeTile: (tileId: string) => void;
+      addTile: (col: number, row: number, tile: Tile) => void;
+      generateTileId: () => string;
+      craftTiles?: (removeIds: string[], addInfo: { col: number; row: number; tile: Tile }) => void;
+    },
+    callbacks?: CraftingCallbacks
+  ): { crafted: boolean; results: CraftResult[] } {
+    
+    if (!CRAFTING_CONFIG.enabled || !CRAFTING_CONFIG.checkOnPlace) {
+      return { crafted: false, results: [] };
     }
     
-    // 2. Проверить каждый рецепт (по приоритету)
-    for (const recipe of candidateRecipes) {
+    // ========================================================================
+    // ШАГ 1: Находим все рецепты которые содержат эту текстуру
+    // ========================================================================
+    const matchingRecipes = RECIPES.filter(r => 
+      r.sequence.includes(placedTile.textureKey)
+    );
+    
+    if (__DEV__) {
+      console.log('[Crafting] 🔍 Проверка рецепта для:', {
+        texture: placedTile.textureKey,
+        position: `${col},${row}`,
+        activeSide: (placedTile as any).activeSide,
+        rotation: placedTile.rotation,
+        matchingRecipesCount: matchingRecipes.length,
+      });
+    }
+    
+    // ========================================================================
+    // ШАГ 2: Проверяем каждый рецепт
+    // ========================================================================
+    for (const recipe of matchingRecipes) {
       const match = this.validateChain(recipe, placedTile, col, row, getTileAt);
+      
       if (match) {
-        if (__DEV__) console.log(`[Crafting] ✅ Рецепт найден: ${recipe.id}`, {
-          sequence: recipe.sequence,
-          matchedTiles: match.matchedTiles.map(t => ({
-            texture: t.tile.textureKey,
-            pos: `${t.col},${t.row}`,
-            activeSide: (t.tile as any).activeSide,
-          })),
-        });
-        return match;
+        if (__DEV__) {
+          console.log('[Crafting] ✅ Рецепт найден:', recipe.id, {
+            matchedTiles: match.matchedTiles.map(m => ({
+              texture: m.tile.textureKey,
+              pos: `${m.col},${m.row}`,
+              activeSide: (m.tile as any).activeSide,
+            })),
+            sequence: recipe.sequence,
+          });
+        }
+        
+        const result = this.executeRecipe(match, tileOperations, callbacks);
+        return { crafted: true, results: [result] };
       }
     }
     
-    if (__DEV__) console.log(`[Crafting] ❌ Ни один рецепт не подошел для "${placedTile.textureKey}"`);
-    return null;
+    if (__DEV__) {
+      console.log(`[Crafting] ❌ Ни один рецепт не подошел для "${placedTile.textureKey}"`);
+    }
+    
+    return { crafted: false, results: [] };
   }
   
-  // --------------------------------------------------------------------------
-  // ПРИВАТНЫЙ МЕТОД: Валидация цепочки для конкретного рецепта
-  // --------------------------------------------------------------------------
-  /**
-   * Проверяет: образует ли размещённая плитка + соседи валидную цепочку для рецепта.
-   * Идёт ОБРАТНО от последнего шага к первому, проверяя активные стороны.
-   */
+  // ============================================================================
+  // 🔑 МЕТОД: Валидация цепочки — только с участием новой плитки
+  // ============================================================================
+  // Ищет валидную цепочку которая ВКЛЮЧАЕТ последнюю размещённую плитку.
+  // Не сканирует всё поле — только цепочки связанные с новой плиткой.
+  // ============================================================================
   private static validateChain(
     recipe: Recipe,
     lastTile: Tile,
@@ -194,85 +151,292 @@ export class CraftingService {
     getTileAt: (col: number, row: number) => PlacedTileInfo | undefined
   ): ChainMatch | null {
     const sequence = recipe.sequence;
-    const matchedTiles: MatchedTile[] = [];
     
-    // Шаг 1: Последний ингредиент (уже размещённая плитка)
-    matchedTiles.push({
-      tile: lastTile,
-      col: lastCol,
-      row: lastRow,
-      sequenceIndex: sequence.length - 1,
-    });
+    // ========================================================================
+    // ШАГ 1: Проверяем цепочку ВПЕРЁД от новой плитки (по стрелкам)
+    // ========================================================================
+    const forwardChain = this.buildChainFromTile(
+      lastTile, lastCol, lastRow, sequence, getTileAt
+    );
     
-    // Шаг 2: Идём назад по цепочке (от N-1 к 0)
-    let currentCol = lastCol;
-    let currentRow = lastRow;
+    if (forwardChain && this.chainMatchesRecipe(forwardChain, sequence)) {
+      return this.createChainMatch(recipe, forwardChain, sequence);
+    }
     
-    for (let step = sequence.length - 2; step >= 0; step--) {
-      const expectedTexture = sequence[step];
+    // ========================================================================
+    // ШАГ 2: Проверяем цепочку НАЗАД от новой плитки (против стрелок)
+    // ========================================================================
+    const backwardChain = this.buildChainBackwards(
+      lastTile, lastCol, lastRow, sequence, getTileAt
+    );
+    
+    if (backwardChain && this.chainMatchesRecipe(backwardChain, sequence)) {
+      return this.createChainMatch(recipe, backwardChain, sequence);
+    }
+    
+    // ========================================================================
+    // ШАГ 3: Проверяем цепочку где новая плитка — СЕРЕДИНА
+    // Идём назад чтобы найти начало, потом вперёд до конца
+    // ========================================================================
+    const middleChain = this.buildChainThroughTile(
+      lastTile, lastCol, lastRow, sequence, getTileAt
+    );
+    
+    if (middleChain && this.chainMatchesRecipe(middleChain, sequence)) {
+      return this.createChainMatch(recipe, middleChain, sequence);
+    }
+    
+    return null;
+  }
+  
+  // ============================================================================
+  // 🔑 МЕТОД: Построение цепочки вперёд (по стрелкам)
+  // ============================================================================
+  private static buildChainFromTile(
+    startTile: Tile,
+    startCol: number,
+    startRow: number,
+    sequence: string[],
+    getTileAt: (col: number, row: number) => PlacedTileInfo | undefined
+  ): { tile: Tile; col: number; row: number; sequenceIndex: number }[] | null {
+    
+    const startIndex = sequence.indexOf(startTile.textureKey);
+    if (startIndex === -1) return null;
+    
+    const chain: { tile: Tile; col: number; row: number; sequenceIndex: number }[] = [];
+    const visited = new Set<string>();
+    
+    let currentTile = startTile;
+    let currentCol = startCol;
+    let currentRow = startRow;
+    let currentIndex = startIndex;
+    
+    while (currentIndex < sequence.length) {
+      const key = `${currentCol},${currentRow}`;
+      if (visited.has(key)) break;
+      visited.add(key);
       
-      // Ищем среди 4 соседей текущей позиции
-      const neighbors = getNeighborPositions(currentCol, currentRow);
-      let found = false;
+      if (currentTile.textureKey !== sequence[currentIndex]) break;
       
-      for (const neighbor of neighbors) {
-        const neighborInfo = getTileAt(neighbor.col, neighbor.row);
-        if (!neighborInfo) continue;
-        
-        const neighborTile = neighborInfo.tile;
-        
-        // Проверка 1: Текстура совпадает?
-        if (neighborTile.textureKey !== expectedTexture) continue;
-        
-        // ======================================================================
-        // 🔑 ИСПРАВЛЕНИЕ: Проверка относительной связи
-        // ======================================================================
-        // Вместо проверки конкретного направления (right/top/etc),
-        // проверяем: указывает ли activeSide соседа НА текущую позицию?
-        // ======================================================================
-        if (!this.doesActiveSidePointTo(neighborTile, neighbor.col, neighbor.row, currentCol, currentRow)) {
-          continue;
-        }
-        
-        // Проверка 3: Плитка ещё не использована в этой цепочке?
-        if (matchedTiles.some(m => m.tile.id === neighborTile.id)) continue;
-        
-        // ✅ Все проверки пройдены
-        matchedTiles.push({
-          tile: neighborTile,
-          col: neighbor.col,
-          row: neighbor.row,
-          sequenceIndex: step,
-        });
-        
-        // Переходим к следующей итерации
-        currentCol = neighbor.col;
-        currentRow = neighbor.row;
-        found = true;
-        break;
-      }
+      chain.push({
+        tile: currentTile,
+        col: currentCol,
+        row: currentRow,
+        sequenceIndex: currentIndex,
+      });
       
-      // Если не нашли подходящий сосед для этого шага — рецепт не подходит
-      if (!found) {
-        if (__DEV__) console.log(`[Crafting] Шаг ${step} ("${expectedTexture}") не найден для рецепта ${recipe.id}`);
-        return null;
+      if (currentIndex === sequence.length - 1) break;
+      
+      const next = this.findTilePointedBy(currentTile, currentCol, currentRow, getTileAt);
+      if (!next || next.tile.textureKey !== sequence[currentIndex + 1]) break;
+      
+      currentTile = next.tile;
+      currentCol = next.col;
+      currentRow = next.row;
+      currentIndex++;
+    }
+    
+    return chain.length === sequence.length ? chain : null;
+  }
+  
+  // ============================================================================
+  // 🔑 МЕТОД: Построение цепочки назад (против стрелок)
+  // ============================================================================
+  private static buildChainBackwards(
+    startTile: Tile,
+    startCol: number,
+    startRow: number,
+    sequence: string[],
+    getTileAt: (col: number, row: number) => PlacedTileInfo | undefined
+  ): { tile: Tile; col: number; row: number; sequenceIndex: number }[] | null {
+    
+    const startIndex = sequence.indexOf(startTile.textureKey);
+    if (startIndex === -1) return null;
+    
+    const chain: { tile: Tile; col: number; row: number; sequenceIndex: number }[] = [];
+    const visited = new Set<string>();
+    
+    let currentTile = startTile;
+    let currentCol = startCol;
+    let currentRow = startRow;
+    let currentIndex = startIndex;
+    
+    // Идём назад пока не найдём начало цепочки
+    while (currentIndex > 0) {
+      const key = `${currentCol},${currentRow}`;
+      if (visited.has(key)) break;
+      visited.add(key);
+      
+      if (currentTile.textureKey !== sequence[currentIndex]) break;
+      
+      const prev = this.findTilePointingTo(currentTile, currentCol, currentRow, getTileAt);
+      if (!prev || prev.tile.textureKey !== sequence[currentIndex - 1]) break;
+      
+      currentTile = prev.tile;
+      currentCol = prev.col;
+      currentRow = prev.row;
+      currentIndex--;
+    }
+    
+    // Теперь идём вперёд от начала
+    while (currentIndex < sequence.length) {
+      const key = `${currentCol},${currentRow}`;
+      if (visited.has(key)) break;
+      visited.add(key);
+      
+      if (currentTile.textureKey !== sequence[currentIndex]) break;
+      
+      chain.push({
+        tile: currentTile,
+        col: currentCol,
+        row: currentRow,
+        sequenceIndex: currentIndex,
+      });
+      
+      if (currentIndex === sequence.length - 1) break;
+      
+      const next = this.findTilePointedBy(currentTile, currentCol, currentRow, getTileAt);
+      if (!next || next.tile.textureKey !== sequence[currentIndex + 1]) break;
+      
+      currentTile = next.tile;
+      currentCol = next.col;
+      currentRow = next.row;
+      currentIndex++;
+    }
+    
+    return chain.length === sequence.length ? chain : null;
+  }
+  
+  // ============================================================================
+  // 🔑 МЕТОД: Построение цепочки где плитка — середина
+  // ============================================================================
+  private static buildChainThroughTile(
+    middleTile: Tile,
+    middleCol: number,
+    middleRow: number,
+    sequence: string[],
+    getTileAt: (col: number, row: number) => PlacedTileInfo | undefined
+  ): { tile: Tile; col: number; row: number; sequenceIndex: number }[] | null {
+    
+    const middleIndex = sequence.indexOf(middleTile.textureKey);
+    if (middleIndex === -1) return null;
+    
+    const visited = new Set<string>();
+    
+    // ФАЗА 1: Идём НАЗАД чтобы найти начало цепочки
+    let startTile = middleTile;
+    let startCol = middleCol;
+    let startRow = middleRow;
+    let startIndex = middleIndex;
+    
+    while (startIndex > 0) {
+      const key = `${startCol},${startRow}`;
+      if (visited.has(key)) break;
+      visited.add(key);
+      
+      const prev = this.findTilePointingTo(startTile, startCol, startRow, getTileAt);
+      if (!prev || prev.tile.textureKey !== sequence[startIndex - 1]) break;
+      
+      startTile = prev.tile;
+      startCol = prev.col;
+      startRow = prev.row;
+      startIndex--;
+    }
+    
+    // ФАЗА 2: Строим цепочку ВПЕРЁД от найденного начала
+    const chain: { tile: Tile; col: number; row: number; sequenceIndex: number }[] = [];
+    let currentTile = startTile;
+    let currentCol = startCol;
+    let currentRow = startRow;
+    let currentIndex = startIndex;
+    
+    while (currentIndex < sequence.length) {
+      const key = `${currentCol},${currentRow}`;
+      if (visited.has(key)) break;
+      visited.add(key);
+      
+      if (currentTile.textureKey !== sequence[currentIndex]) break;
+      
+      chain.push({
+        tile: currentTile,
+        col: currentCol,
+        row: currentRow,
+        sequenceIndex: currentIndex,
+      });
+      
+      if (currentIndex === sequence.length - 1) break;
+      
+      const next = this.findTilePointedBy(currentTile, currentCol, currentRow, getTileAt);
+      if (!next || next.tile.textureKey !== sequence[currentIndex + 1]) break;
+      
+      currentTile = next.tile;
+      currentCol = next.col;
+      currentRow = next.row;
+      currentIndex++;
+    }
+    
+    return chain.length === sequence.length ? chain : null;
+  }
+  
+  // ============================================================================
+  // 🔑 МЕТОД: Найти плитку на которую указывает activeSide
+  // ============================================================================
+  private static findTilePointedBy(
+    tile: Tile,
+    col: number,
+    row: number,
+    getTileAt: (col: number, row: number) => PlacedTileInfo | undefined
+  ): { tile: Tile; col: number; row: number } | null {
+    const activeSide = (tile as any).activeSide as Edge | undefined;
+    if (!activeSide) return null;
+    
+    const edges: Edge[] = ['top', 'right', 'bottom', 'left'];
+    const baseIndex = edges.indexOf(activeSide);
+    const steps = tile.rotation / 90;
+    const finalIndex = (baseIndex + steps) % 4;
+    const finalEdge = edges[finalIndex];
+    
+    let targetCol = col;
+    let targetRow = row;
+    
+    switch (finalEdge) {
+      case 'top': targetRow--; break;
+      case 'bottom': targetRow++; break;
+      case 'left': targetCol--; break;
+      case 'right': targetCol++; break;
+    }
+    
+    const target = getTileAt(targetCol, targetRow);
+    return target ? { tile: target.tile, col: targetCol, row: targetRow } : null;
+  }
+  
+  // ============================================================================
+  // 🔑 МЕТОД: Найти плитку которая указывает НА текущую
+  // ============================================================================
+  private static findTilePointingTo(
+    tile: Tile,
+    col: number,
+    row: number,
+    getTileAt: (col: number, row: number) => PlacedTileInfo | undefined
+  ): { tile: Tile; col: number; row: number } | null {
+    const neighbors = getNeighborPositions(col, row);
+    
+    for (const neighbor of neighbors) {
+      const neighborInfo = getTileAt(neighbor.col, neighbor.row);
+      if (!neighborInfo) continue;
+      
+      const neighborTile = neighborInfo.tile;
+      
+      if (this.doesActiveSidePointTo(neighborTile, neighbor.col, neighbor.row, col, row)) {
+        return { tile: neighborTile, col: neighbor.col, row: neighbor.row };
       }
     }
     
-    // ✅ Вся цепочка валидна! Сортируем по порядку рецепта (0, 1, 2...)
-    matchedTiles.sort((a, b) => a.sequenceIndex - b.sequenceIndex);
-    
-    const resultPosition = this.calculateResultPosition(recipe, matchedTiles);
-    
-    return {
-      recipe,
-      matchedTiles,
-      resultPosition,
-    };
+    return null;
   }
-
+  
   // ============================================================================
-  // 🔑 ИСПРАВЛЕННЫЙ МЕТОД: Проверка — указывает ли activeSide НА целевую ячейку
+  // 🔑 МЕТОД: Проверка — указывает ли activeSide НА целевую ячейку
   // ============================================================================
   private static doesActiveSidePointTo(
     tile: Tile,
@@ -281,18 +445,15 @@ export class CraftingService {
     targetCol: number,
     targetRow: number
   ): boolean {
-    // Если у плитки нет activeSide — она не может участвовать в упорядоченных рецептах
     const activeSide = (tile as any).activeSide as Edge | undefined;
     if (!activeSide) return false;
     
-    // Вычисляем куда "смотрит" activeSide с учётом поворота плитки
     const edges: Edge[] = ['top', 'right', 'bottom', 'left'];
     const baseIndex = edges.indexOf(activeSide);
     const steps = tile.rotation / 90;
     const finalIndex = (baseIndex + steps) % 4;
     const finalEdge = edges[finalIndex];
     
-    // Вычисляем целевую позицию на основе finalEdge
     let expectedTargetCol = tileCol;
     let expectedTargetRow = tileRow;
     
@@ -303,46 +464,82 @@ export class CraftingService {
       case 'right': expectedTargetCol++; break;
     }
     
-    // Сравниваем с целевой позицией
     return expectedTargetCol === targetCol && expectedTargetRow === targetRow;
   }
-
   
-  // --------------------------------------------------------------------------
-  // ПРИВАТНЫЙ МЕТОД: Расчёт позиции для результирующей плитки
-  // --------------------------------------------------------------------------
+  // ============================================================================
+  // 🔑 МЕТОД: Проверка совпадения цепочки с рецептом
+  // ============================================================================
+  private static chainMatchesRecipe(
+    chain: { tile: Tile; col: number; row: number; sequenceIndex: number }[],
+    sequence: string[]
+  ): boolean {
+    if (chain.length !== sequence.length) return false;
+    
+    const sorted = [...chain].sort((a, b) => a.sequenceIndex - b.sequenceIndex);
+    
+    for (let i = 0; i < sequence.length; i++) {
+      if (sorted[i].tile.textureKey !== sequence[i]) return false;
+    }
+    
+    return true;
+  }
+  
+  // ============================================================================
+  // 🔑 МЕТОД: Создать ChainMatch из найденной цепочки
+  // ============================================================================
+  private static createChainMatch(
+    recipe: Recipe,
+    chain: { tile: Tile; col: number; row: number; sequenceIndex: number }[],
+    sequence: string[]
+  ): ChainMatch {
+    const sorted = [...chain].sort((a, b) => a.sequenceIndex - b.sequenceIndex);
+    
+    const matchedTiles: MatchedTile[] = sorted.map(item => ({
+      tile: item.tile,
+      col: item.col,
+      row: item.row,
+      sequenceIndex: item.sequenceIndex,
+    }));
+    
+    const resultPosition = this.calculateResultPosition(recipe, matchedTiles);
+    
+    return { recipe, matchedTiles, resultPosition };
+  }
+  
+  // ============================================================================
+  // 🔑 МЕТОД: Вычислить позицию результата
+  // ============================================================================
   private static calculateResultPosition(
     recipe: Recipe,
     matchedTiles: MatchedTile[]
   ): { col: number; row: number } {
-    const strategy = recipe.execution?.resultPosition ?? 'last';
+    const exec = recipe.execution;
     
-    switch (strategy) {
-      case 'first':
-        return { col: matchedTiles[0].col, row: matchedTiles[0].row };
-      
-      case 'center':
-        // Для чётного количества — берём левый центр
-        const centerIndex = Math.floor(matchedTiles.length / 2);
-        return { col: matchedTiles[centerIndex].col, row: matchedTiles[centerIndex].row };
-      
-      case 'last':
-      default:
-        return { col: matchedTiles[matchedTiles.length - 1].col, row: matchedTiles[matchedTiles.length - 1].row };
+    if (exec?.resultPosition === 'first' && matchedTiles.length > 0) {
+      return { col: matchedTiles[0].col, row: matchedTiles[0].row };
     }
+    
+    if (exec?.resultPosition === 'last' && matchedTiles.length > 0) {
+      return { col: matchedTiles[matchedTiles.length - 1].col, row: matchedTiles[matchedTiles.length - 1].row };
+    }
+    
+    if (exec?.resultPosition === 'center' && matchedTiles.length > 0) {
+      const mid = Math.floor(matchedTiles.length / 2);
+      return { col: matchedTiles[mid].col, row: matchedTiles[mid].row };
+    }
+    
+    // По умолчанию — последняя плитка
+    if (matchedTiles.length > 0) {
+      return { col: matchedTiles[matchedTiles.length - 1].col, row: matchedTiles[matchedTiles.length - 1].row };
+    }
+    
+    return { col: 0, row: 0 };
   }
   
-  // --------------------------------------------------------------------------
-  // ПУБЛИЧНЫЙ МЕТОД: Выполнение крафта
-  // --------------------------------------------------------------------------
-  /**
-   * Удаляет ингредиенты и создаёт результирующую плитку.
-   * 
-   * @param match - результат findMatchingRecipe()
-   * @param callbacks - опциональные колбэки для внешней логики
-   * @param tileOperations - функции для изменения состояния (из TilesContext)
-   * @returns CraftResult
-   */
+  // ============================================================================
+  // 🔑 МЕТОД: Выполнение рецепта
+  // ============================================================================
   static executeRecipe(
     match: ChainMatch,
     tileOperations: {
@@ -358,10 +555,8 @@ export class CraftingService {
     
     callbacks?.onCraftStart?.(recipe, matchedTiles);
     
-    // Собираем ID удаляемых плиток
     const removedIds: string[] = matchedTiles.map(mt => mt.tile.id);
     
-    // Создаём результирующую плитку
     const resultTile = new Tile({
       id: generateTileId(),
       textureKey: recipe.result.textureKey,
@@ -372,18 +567,13 @@ export class CraftingService {
       (resultTile as any).activeSide = recipe.result.activeSide;
     }
     
-    // ========================================================================
-    // 🔑 АТОМАРНОЕ ОБНОВЛЕНИЕ — всё за один вызов!
-    // ========================================================================
     if (craftTiles) {
-      // Используем новый метод
       craftTiles(removedIds, {
         col: resultPosition.col,
         row: resultPosition.row,
         tile: resultTile,
       });
     } else {
-      // Fallback на старый метод (с задержкой)
       for (const id of removedIds) {
         removeTile(id);
       }
@@ -392,9 +582,6 @@ export class CraftingService {
       }, 50);
     }
     
-    // ========================================================================
-    // Колбэки
-    // ========================================================================
     const result: CraftResult = {
       success: true,
       recipeId: recipe.id,
@@ -413,20 +600,9 @@ export class CraftingService {
     return result;
   }
   
-  // --------------------------------------------------------------------------
-  // ПУБЛИЧНЫЙ МЕТОД: Проверка цепочки (рекурсивно)
-  // --------------------------------------------------------------------------
-  /**
-   * После выполнения крафта проверяет: может ли результат участвовать в новом рецепте.
-   * Вызывается рекурсивно пока есть совпадения.
-   * 
-   * @param resultTile - только что созданная плитка
-   * @param col, row - её позиция
-   * @param depth - текущая глубина цепочки (для отладки)
-   * @param visitedIds - ID плиток созданных в этой цепочке (защита от зацикливания)
-   * @param getTileAt, tileOperations, callbacks - как в executeRecipe
-   * @returns массив результатов всех выполненных крафтов в цепочке
-   */
+  // ============================================================================
+  // МЕТОД: Проверка цепочек (рекурсивно для мульти-крафта)
+  // ============================================================================
   static checkChain(
     resultTile: Tile,
     col: number,
@@ -434,69 +610,36 @@ export class CraftingService {
     depth: number,
     visitedIds: Set<string>,
     getTileAt: (col: number, row: number) => PlacedTileInfo | undefined,
-    tileOperations: {
-      removeTile: (tileId: string) => void;
-      addTile: (col: number, row: number, tile: Tile) => void;
-      generateTileId: () => string;
-    },
+    tileOperations: any,
     callbacks?: CraftingCallbacks
   ): CraftResult[] {
+    if (depth > 10) return [];
+    
     const results: CraftResult[] = [];
     
-    // Защита: если плитка уже участвовала в этой цепочке — стоп
-    if (visitedIds.has(resultTile.id)) {
-      if (__DEV__) console.warn(`[Crafting] ⚠️ Цикл обнаружен: плитка ${resultTile.id} уже в цепочке`);
-      return results;
-    }
-    visitedIds.add(resultTile.id);
+    const matchingRecipes = RECIPES.filter(r => 
+      r.sequence.includes(resultTile.textureKey)
+    );
     
-    // Уведомление о начале шага цепочки
-    callbacks?.onChainStart?.(resultTile, depth);
-    
-    // 1. Найти рецепты где resultTile может быть НЕ последним шагом
-    // (т.е. она может быть шагом 1, 2, ... N-1 в новой цепочке)
-    const candidateRecipes = getRecipesWhereTextureIsNotLast(resultTile.textureKey);
-    if (candidateRecipes.length === 0) {
-      if (__DEV__ && depth > 0) console.log(`[Crafting] 🔗 Цепочка завершена на глубине ${depth}: нет рецептов для "${resultTile.textureKey}"`);
-      return results;
-    }
-    
-    // 2. Для каждого рецепта проверить: может ли resultTile быть частью цепочки
-    // Здесь логика сложнее: resultTile может быть на любой позиции кроме последней
-    for (const recipe of candidateRecipes) {
-      // Ищем позицию resultTile в последовательности рецепта
-      const tileIndex = recipe.sequence.indexOf(resultTile.textureKey);
-      if (tileIndex === -1 || tileIndex === recipe.sequence.length - 1) continue;
-      
-      // Проверяем: может ли resultTile быть "якорем" для этого рецепта
-      // Для этого нужно проверить соседей в обоих направлениях:
-      // - Вперёд: ищем шаг tileIndex+1, tileIndex+2... до конца
-      // - Назад: ищем шаг tileIndex-1, tileIndex-2... до начала
-      
-      const match = this.validateChainFromAnchor(
-        recipe,
-        tileIndex,
-        resultTile,
-        col,
-        row,
-        getTileAt
-      );
+    for (const recipe of matchingRecipes) {
+      const match = this.validateChain(recipe, resultTile, col, row, getTileAt);
       
       if (match) {
-        // ✅ Рецепт подходит — выполняем крафт
-        const craftResult = this.executeRecipe(match, tileOperations, callbacks);
-        results.push(craftResult);
+        const hasVisited = match.matchedTiles.some(m => visitedIds.has(m.tile.id));
+        if (hasVisited) continue;
         
-        // Если крафт успешен и цепочка может продолжаться — рекурсивный вызов
-        if (craftResult.success && craftResult.chainContinues && craftResult.createdTile) {
-          const delay = recipe.chaining?.delayBetweenSteps ?? 150;
-          
-          // В реальном приложении здесь был бы setTimeout для анимации
-          // Для синхронного теста вызываем сразу:
+        match.matchedTiles.forEach(m => visitedIds.add(m.tile.id));
+        
+        callbacks?.onChainStart?.(resultTile, depth);
+        
+        const result = this.executeRecipe(match, tileOperations, callbacks);
+        results.push(result);
+        
+        if (result.chainContinues && result.createdTile) {
           const chainResults = this.checkChain(
-            craftResult.createdTile.tile,
-            craftResult.createdTile.col,
-            craftResult.createdTile.row,
+            result.createdTile.tile,
+            result.createdTile.col,
+            result.createdTile.row,
             depth + 1,
             visitedIds,
             getTileAt,
@@ -505,214 +648,10 @@ export class CraftingService {
           );
           results.push(...chainResults);
         }
-        
-        // После первого успешного крафта выходим (один результат за раз)
-        break;
       }
     }
     
     return results;
-  }
-  
-  // --------------------------------------------------------------------------
-  // ПРИВАТНЫЙ МЕТОД: Валидация цепочки от "якорной" плитки
-  // --------------------------------------------------------------------------
-  /**
-   * Специальная версия validateChain для когда плитка может быть в середине последовательности.
-   * Проверяет соседей в обоих направлениях от якоря.
-   */
-  private static validateChainFromAnchor(
-    recipe: Recipe,
-    anchorIndex: number,  // Позиция anchorTile в recipe.sequence
-    anchorTile: Tile,
-    anchorCol: number,
-    anchorRow: number,
-    getTileAt: (col: number, row: number) => PlacedTileInfo | undefined
-  ): ChainMatch | null {
-    const sequence = recipe.sequence;
-    const matchedTiles: MatchedTile[] = [];
-    
-    // Шаг 1: Добавить якорную плитку
-    matchedTiles.push({
-      tile: anchorTile,
-      col: anchorCol,
-      row: anchorRow,
-      sequenceIndex: anchorIndex,
-    });
-    
-    // Шаг 2: Идём ВПЕРЁД от якоря (к последнему шагу рецепта)
-    let currentCol = anchorCol;
-    let currentRow = anchorRow;
-    
-    for (let step = anchorIndex + 1; step < sequence.length; step++) {
-      const expectedTexture = sequence[step];
-      const found = this.findNextInChain(expectedTexture, currentCol, currentRow, getTileAt, matchedTiles);
-      
-      if (!found) return null;
-      currentCol = found.col;
-      currentRow = found.row;
-      
-      matchedTiles.push({
-        tile: found.tile,
-        col: found.col,
-        row: found.row,
-        sequenceIndex: step,
-      });
-    }
-    
-    // Шаг 3: Идём НАЗАД от якоря (к первому шагу рецепта)
-    currentCol = anchorCol;
-    currentRow = anchorRow;
-    
-    for (let step = anchorIndex - 1; step >= 0; step--) {
-      const expectedTexture = sequence[step];
-      const found = this.findPrevInChain(expectedTexture, currentCol, currentRow, getTileAt, matchedTiles);
-      
-      if (!found) return null;
-      currentCol = found.col;
-      currentRow = found.row;
-      
-      matchedTiles.push({
-        tile: found.tile,
-        col: found.col,
-        row: found.row,
-        sequenceIndex: step,
-      });
-    }
-    
-    // ✅ Вся цепочка собрана
-    matchedTiles.sort((a, b) => a.sequenceIndex - b.sequenceIndex);
-    const resultPosition = this.calculateResultPosition(recipe, matchedTiles);
-    
-    return { recipe, matchedTiles, resultPosition };
-  }
-  
-  // ============================================================================
-  // 🔑 ИСПРАВЛЕННЫЙ МЕТОД: Поиск следующего шага в цепочке (вперёд)
-  // ============================================================================
-  private static findNextInChain(
-    expectedTexture: string,
-    fromCol: number,
-    fromRow: number,
-    getTileAt: (col: number, row: number) => PlacedTileInfo | undefined,
-    excludeTiles: MatchedTile[]
-  ): { tile: Tile; col: number; row: number } | null {
-    const neighbors = getNeighborPositions(fromCol, fromRow);
-    
-    for (const neighbor of neighbors) {
-      const neighborInfo = getTileAt(neighbor.col, neighbor.row);
-      if (!neighborInfo) continue;
-      
-      const neighborTile = neighborInfo.tile;
-      
-      // Проверка 1: Текстура совпадает?
-      if (neighborTile.textureKey !== expectedTexture) continue;
-      
-      // Проверка 2: Плитка ещё не использована?
-      if (excludeTiles.some(m => m.tile.id === neighborTile.id)) continue;
-      
-      // ======================================================================
-      // 🔑 Ключевое: activeSide ТЕКУЩЕЙ плитки должна указывать НА соседа
-      // ======================================================================
-      const fromTileInfo = getTileAt(fromCol, fromRow);
-      if (!fromTileInfo) continue;
-      
-      if (!this.doesActiveSidePointTo(fromTileInfo.tile, fromCol, fromRow, neighbor.col, neighbor.row)) {
-        continue;
-      }
-      
-      return { tile: neighborTile, col: neighbor.col, row: neighbor.row };
-    }
-    
-    return null;
-  }
-  
-  // ============================================================================
-  // 🔑 ИСПРАВЛЕННЫЙ МЕТОД: Поиск предыдущего шага в цепочке (назад)
-  // ============================================================================
-  private static findPrevInChain(
-    expectedTexture: string,
-    fromCol: number,
-    fromRow: number,
-    getTileAt: (col: number, row: number) => PlacedTileInfo | undefined,
-    excludeTiles: MatchedTile[]
-  ): { tile: Tile; col: number; row: number } | null {
-    const neighbors = getNeighborPositions(fromCol, fromRow);
-    
-    for (const neighbor of neighbors) {
-      const neighborInfo = getTileAt(neighbor.col, neighbor.row);
-      if (!neighborInfo) continue;
-      
-      const neighborTile = neighborInfo.tile;
-      
-      // Проверки
-      if (neighborTile.textureKey !== expectedTexture) continue;
-      if (excludeTiles.some(m => m.tile.id === neighborTile.id)) continue;
-      
-      // ======================================================================
-      // 🔑 Ключевое: activeSide СОСЕДА должна указывать НА текущую плитку
-      // ======================================================================
-      if (!this.doesActiveSidePointTo(neighborTile, neighbor.col, neighbor.row, fromCol, fromRow)) {
-        continue;
-      }
-      
-      return { tile: neighborTile, col: neighbor.col, row: neighbor.row };
-    }
-    
-    return null;
-  }
-
-  // --------------------------------------------------------------------------
-  // ПУБЛИЧНЫЙ МЕТОД: Полная обработка размещения плитки
-  // --------------------------------------------------------------------------
-  /**
-   * Высокоуровневый метод: проверка + выполнение + цепочка.
-   * Удобно для вызова из useCrafting хука.
-   */
-  static onTilePlaced(
-    placedTile: Tile,
-    col: number,
-    row: number,
-    getTileAt: (col: number, row: number) => PlacedTileInfo | undefined,
-    tileOperations: {
-      removeTile: (tileId: string) => void;
-      addTile: (col: number, row: number, tile: Tile) => void;
-      generateTileId: () => string;
-      craftTiles?: (  // ← 🔑 НОВОЕ: опциональный метод
-        removeIds: string[],
-        addInfo: { col: number; row: number; tile: Tile }
-      ) => void;
-    },
-    callbacks?: CraftingCallbacks
-  ): { crafted: boolean; results: CraftResult[] } {
-    // 1. Проверить рецепт
-    const match = this.findMatchingRecipe(placedTile, col, row, getTileAt);
-    if (!match) {
-      return { crafted: false, results: [] };
-    }
-    
-    // 2. Выполнить крафт
-    const firstResult = this.executeRecipe(match, tileOperations, callbacks);
-    const results: CraftResult[] = [firstResult];
-    
-    // 3. Если цепочка может продолжаться — проверить рекурсивно
-    if (firstResult.chainContinues && firstResult.createdTile) {
-      const visitedIds = new Set<string>(firstResult.removedTileIds);
-      
-      const chainResults = this.checkChain(
-        firstResult.createdTile.tile,
-        firstResult.createdTile.col,
-        firstResult.createdTile.row,
-        1,  // depth
-        visitedIds,
-        getTileAt,
-        tileOperations,
-        callbacks
-      );
-      results.push(...chainResults);
-    }
-    
-    return { crafted: true, results };
   }
 }
 
