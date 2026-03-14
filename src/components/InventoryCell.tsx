@@ -175,16 +175,51 @@ const InventoryCell: React.FC<InventoryCellProps> = ({
   useEffect(() => {
     if (draggable.state === 'DRAGGING') {
       setActiveInventoryTileId(tile.id);
-      if (global.inventoryDragState) {
-        global.inventoryDragState.tileId = tile.id;
-        global.inventoryDragState.rotation = draggable.rotation;
+      
+      // Инициализировать global.inventoryDragState если не существует
+      if (!global.inventoryDragState) {
+        global.inventoryDragState = {
+          isDragging: false,
+          tileId: null,
+          position: { x: 0, y: 0 },
+          rotation: 0,
+        };
+      }
+      
+      global.inventoryDragState.isDragging = true;
+      global.inventoryDragState.tileId = tile.id;
+      global.inventoryDragState.rotation = draggable.rotation;
+      
+      // Это позиция где плитка была ДО начала перетаскивания
+      global.inventoryDragState.position = {
+        x: initialPosition.x,
+        y: initialPosition.y,
+      };
+      
+      if (__DEV__) {
+        console.log(`[InventoryCell] 🚀 Drag START:`, {
+          tileId: tile.id,
+          isDragging: global.inventoryDragState.isDragging,
+          startPosition: global.inventoryDragState.position,
+        });
       }
     } else if (global.inventoryDragState?.tileId === tile.id) {
+      // Драг закончился — сбрасываем флаги
       setActiveInventoryTileId(null);
       global.inventoryDragState.isDragging = false;
       global.inventoryDragState.tileId = null;
+      global.inventoryDragState.rotation = 0;
+      
+      // ❌ НЕ сбрасываем position — он обновится при следующем драге
+      
+      if (__DEV__) {
+        console.log(`[InventoryCell] 🛑 Drag END:`, {
+          tileId: tile.id,
+          isDragging: global.inventoryDragState.isDragging,
+        });
+      }
     }
-  }, [draggable.state, tile.id, draggable.rotation, setActiveInventoryTileId]);
+  }, [draggable.state, tile.id, draggable.rotation, setActiveInventoryTileId, initialPosition]);
   
   // ============================================================================
   // РЕНДЕР — ТОЛЬКО СТАТИЧНАЯ ПЛИТКА
