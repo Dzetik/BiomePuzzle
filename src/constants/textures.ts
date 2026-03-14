@@ -20,6 +20,13 @@ import sprite19 from '../../assets/images/textures/sprite-19.png';
 import sprite20 from '../../assets/images/textures/sprite-20.png';
 import sprite21 from '../../assets/images/textures/sprite-21.png';
 import sprite22 from '../../assets/images/textures/sprite-22.png';
+import apple from '../../assets/images/textures/item-tile/apple.png';
+import bread from '../../assets/images/textures/item-tile/bread.png';
+import butter from '../../assets/images/textures/item-tile/butter.png';
+import fire from '../../assets/images/textures/item-tile/fire.png';
+import millet from '../../assets/images/textures/item-tile/millet.png';
+import toast from '../../assets/images/textures/item-tile/toast.png';
+import water from '../../assets/images/textures/item-tile/water.png';
 
 export const TEXTURE_MAP: Record<string, any> = {
   sprite1: sprite1,
@@ -44,6 +51,13 @@ export const TEXTURE_MAP: Record<string, any> = {
   sprite20: sprite20,
   sprite21: sprite21,
   sprite22: sprite22,
+  apple: apple,
+  bread: bread,
+  butter: butter,
+  fire: fire,
+  millet: millet,
+  toast: toast,
+  water: water,
 };
 
-export const DEFAULT_TEXTURE = sprite1;
+export const DEFAULT_TEXTURE = apple;

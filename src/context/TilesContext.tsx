@@ -108,6 +108,7 @@ export const TilesProvider: React.FC<TilesProviderProps> = ({ children }) => {
       id: instanceId,
       textureKey: definition.textureKey,
       baseEdges: definition.baseEdges,
+      activeSide: definition.activeSide,  
       rotation: 0,
     });
     

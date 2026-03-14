@@ -1,8 +1,8 @@
 // ========================================
-// ГЛАВНЫЙ ФАЙЛ ПРИЛОЖЕНИЯ (ИСПРАВЛЕННЫЙ — Вариант А)
+// ГЛАВНЫЙ ФАЙЛ ПРИЛОЖЕНИЯ (ФИНАЛЬНЫЙ)
 // ========================================
 import React, { useEffect, useState, useCallback, useMemo, useRef } from 'react';
-import { View, StyleSheet, StatusBar, LogBox, Dimensions } from 'react-native';
+import { View, StyleSheet, StatusBar, LogBox, Text } from 'react-native';
 import { GestureHandlerRootView, GestureDetector, Gesture } from 'react-native-gesture-handler';
 
 import TileView from './src/components/TileView';
@@ -19,13 +19,15 @@ import { GridProvider } from './src/context/GridContext';
 
 import { getSpawnerSize } from './src/constants/spawner';
 import { DEFAULT_TILE_SIZE } from './src/constants/tile';
-import { INVENTORY_CELL_SIZE, INVENTORY_CELL_SPACING } from './src/constants/inventory';
+import { INVENTORY_CELL_SIZE } from './src/constants/inventory';
 import { SpawnerService } from './src/services/SpawnerService';
 import { getSnapToCellPosition } from './src/utils/gridUtils';
 import { TEXTURE_MAP, DEFAULT_TEXTURE } from './src/constants/textures';
-import { TileState } from './src/state';
 
-import { INVENTORY_DROP_ZONE_TOTAL_HEIGHT, INVENTORY_DROP_ZONE_PADDING_BOTTOM } from './src/constants/inventory';
+import { useCrafting } from './src/hooks/useCrafting';
+import { CRAFTING_CONFIG } from './src/constants/CraftingConfig';
+import { CraftResult } from './src/services/CraftingService';
+import { Tile } from './src/models';
 
 if (__DEV__) {
   LogBox.ignoreLogs([
@@ -51,7 +53,7 @@ const ZoomHandler = ({ children }) => {
 };
 
 // ========================================
-// PlacedTiles
+// PlacedTiles — с поддержкой activeSide
 // ========================================
 const PlacedTiles = () => {
   const { getAllTiles } = useTiles();
@@ -80,6 +82,8 @@ const PlacedTiles = () => {
             height={cellSize * scale}
             tileId={tile.id}
             rotation={tile.rotation}
+            // 🔑 Передаём объект tile для отрисовки activeSide (стрелки)
+            tile={tile}
             debugLabel={`Placed[${entry.col},${entry.row}]`}
           />
         );
@@ -89,7 +93,7 @@ const PlacedTiles = () => {
 };
 
 // ========================================
-// GameContent — ФИНАЛЬНАЯ ВЕРСИЯ (с setInterval для ре-рендера)
+// GameContent
 // ========================================
 const GameContent = () => {
   const { 
@@ -98,18 +102,23 @@ const GameContent = () => {
     moveSpawnerTileToInventory,
     activeInventoryTileId,
     getInventoryTile,
+    addTile,
+    removeTile,
+    getTileAt,
   } = useTiles();
   
   const spawnerPos = useSpawner();
   const { offset } = useGrid();
   const [isInitialized, setIsInitialized] = useState(false);
-  const activeTileIdRef = useRef(null);
+  const activeTileIdRef = useRef<string | null>(null);
   const hasActiveTileRef = useRef(false);
 
-  // ============================================================================
-  // 🔑 State для триггера ре-рендера при драге инвентаря
-  // ============================================================================
   const [inventoryDragTick, setInventoryDragTick] = useState(0);
+  const [craftFeedback, setCraftFeedback] = useState<{
+    active: boolean;
+    message?: string;
+    recipeId?: string;
+  }>({ active: false });
 
   // Инициализация спавнера
   useEffect(() => {
@@ -146,14 +155,59 @@ const GameContent = () => {
 
   const initialPosition = useMemo(() => getInitialPosition(), [getInitialPosition, spawnerTile?.id]); 
 
-  const handleTilePlaced = useCallback((cell) => {
-    console.log('🔥 [1] handleTilePlaced');
+  // ============================================================================
+  // 🔑 БАЗОВЫЙ колбэк размещения (только оригинальная логика)
+  // ============================================================================
+  const handleTilePlacedBase = useCallback((
+    cell: { col: number; row: number },
+    placedTile?: Tile  // ← 🔑 НОВОЕ: плитка передаётся из useDraggable
+  ) => {
+    console.log('🔥 [1] handleTilePlacedBase');
+    
+    // Оригинальная логика: создание новой плитки в спавнере
+    // (теперь с учётом крафта — плитка может иметь activeSide)
     const newTile = createSpawnerTile();
     if (newTile?.id) {
       activeTileIdRef.current = newTile.id;
-      console.log('🔥 [2] New spawner tile:', newTile.id);
+      console.log('🔥 [2] New spawner tile:', newTile.id, {
+        texture: newTile.textureKey,
+        activeSide: newTile.activeSide,
+      });
     }
   }, [createSpawnerTile]);
+
+  // ============================================================================
+  // 🔑 ОБЁРТЫВАЕМ базовый колбэк через useCrafting
+  // ============================================================================
+  const handleTilePlaced = useCrafting(handleTilePlacedBase, {
+    // Зависимости из контекста
+    getTileAt,
+    addTile,
+    removeTile,
+    generateTileId: () => `craft-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    
+    // Колбэки для визуальной обратной связи
+    onCraftStart: (recipeId: string, ingredientIds: string[]) => {
+      if (__DEV__) console.log(`[App] ✨ Крафт начался: ${recipeId}`, { ingredientIds });
+      setCraftFeedback({ active: true, recipeId, message: 'Крафт...' });
+    },
+    
+    onCraftComplete: (result: CraftResult) => {
+      if (__DEV__) console.log(`[App] ✅ Крафт завершён:`, result.message);
+      setCraftFeedback({ 
+        active: true, 
+        recipeId: result.recipeId, 
+        message: result.message 
+      });
+      setTimeout(() => {
+        setCraftFeedback(prev => prev.active ? { active: false } : prev);
+      }, CRAFTING_CONFIG.chainDelayMs + 200);
+    },
+    
+    onChainStart: (resultTile, depth) => {
+      if (__DEV__) console.log(`[App] 🔗 Цепочка шаг ${depth}: ${resultTile.textureKey}`);
+    },
+});
 
   const handleDroppedInInventory = useCallback(() => {
     if (__DEV__) console.log('[App] 📦 Dropped to inventory');
@@ -169,7 +223,6 @@ const GameContent = () => {
     }
   }, [moveSpawnerTileToInventory, createSpawnerTile]);
 
-  // useDraggable для спавнера
   const draggableTile = useDraggable(
     spawnerTile,
     spawnerTile?.id || null, 
@@ -180,21 +233,14 @@ const GameContent = () => {
     handleDroppedInInventory
   );
 
-  // ============================================================================
-  // 🔑 Активная плитка инвентаря
-  // ============================================================================
   const activeInventoryTile = activeInventoryTileId ? getInventoryTile(activeInventoryTileId) : null;
 
-  // ============================================================================
-  // 🔑 setInterval для ре-рендера при драге инвентаря
-  // ============================================================================
   useEffect(() => {
     const interval = setInterval(() => {
       if (global.inventoryDragState?.isDragging) {
         setInventoryDragTick(t => t + 1);
       }
     }, 16);
-    
     return () => clearInterval(interval);
   }, []);
 
@@ -205,15 +251,21 @@ const GameContent = () => {
     draggableTile?.state !== 'PLACED' &&
     spawnerTile !== null;
 
-  // ============================================================================
-  // РЕНДЕР
-  // ============================================================================
   return (
     <View style={styles.gameContainer}>
       <GridView />
       <SpawnerCellView />
       <PlacedTiles />
       <InventoryStrip />
+
+      {/* Фидбек крафта */}
+      {CRAFTING_CONFIG.animateMerge && craftFeedback.active && (
+        <View style={styles.craftFeedback}>
+          <Text style={styles.craftFeedbackText}>
+            ✨ {craftFeedback.message || 'Крафт...'}
+          </Text>
+        </View>
+      )}
 
       {/* Плитка спавнера */}
       {shouldRenderActiveTile && spawnerTile && draggableTile?.gesture && (
@@ -225,14 +277,13 @@ const GameContent = () => {
             height={draggableTile.height}
             tileId={spawnerTile.id}
             rotation={spawnerTile?.rotation ?? 0}
+            tile={spawnerTile}
             debugLabel="SpawnerActive"
           />
         </GestureDetector>
       )}
       
-      {/* ============================================================================ */}
-      {/* 🔑 Плитка инвентаря — рендерится с inventoryDragTick */}
-      {/* ============================================================================ */}
+      {/* Плитка инвентаря */}
       {activeInventoryTile && global.inventoryDragState?.isDragging && (
         <TileView
           key={`inventory-floating-${inventoryDragTick}`}
@@ -243,6 +294,7 @@ const GameContent = () => {
           tileId={activeInventoryTile.id}
           rotation={global.inventoryDragState.rotation || 0}
           isInInventory={false}
+          tile={activeInventoryTile}
           debugLabel="InventoryFloating"
         />
       )}
@@ -279,6 +331,25 @@ const styles = StyleSheet.create({
   gameContainer: { 
     flex: 1,
     overflow: 'visible',
+  },
+  craftFeedback: {
+    position: 'absolute',
+    bottom: 120,
+    left: 0,
+    right: 0,
+    alignItems: 'center',
+    zIndex: 9999,
+    pointerEvents: 'none',
+  },
+  craftFeedbackText: {
+    backgroundColor: 'rgba(76, 175, 80, 0.95)',
+    color: '#fff',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 20,
+    fontSize: 14,
+    fontWeight: '600',
+    elevation: 10,
   },
 });
 

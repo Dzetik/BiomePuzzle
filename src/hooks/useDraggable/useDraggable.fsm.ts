@@ -36,7 +36,7 @@ export const useDraggableFSM = (
   initialTileData: Tile | null = null,    // Данные плитки (экземпляр Tile)
   tileId: string | null = null,           // Уникальный идентификатор плитки
   externalInitialPosition: { x: number; y: number } | null = null,  // Начальная позиция
-  onPlaced?: (cell: { col: number; row: number }) => void,  // Колбэк размещения
+  onPlaced?: (cell: { col: number; row: number }, tile?: Tile) => void,  // Колбэк размещения
   onReturned?: () => void,  // Колбэк возврата в источник
   source: 'SPAWNER' | 'INVENTORY' = 'SPAWNER',  // Источник плитки
   onDroppedInInventory?: () => boolean,
@@ -196,11 +196,13 @@ export const useDraggableFSM = (
       : (currentTileRef.current || initialTileData),
     
     onPlaced: (cell) => {
-      if (currentTileRef.current) {
-        addTile(cell.col, cell.row, currentTileRef.current);
+      const tileToPlace = currentTileRef.current;  // ← Сохраняем ссылку
+      if (tileToPlace) {
+        addTile(cell.col, cell.row, tileToPlace);
         currentTileRef.current = null;
       }
-      onPlaced?.(cell);
+      // Передаём плитку вторым аргументом
+      onPlaced?.(cell, tileToPlace);  // ← Передаём tile
     },
     onReturned: () => {
       currentTileRef.current = null;
