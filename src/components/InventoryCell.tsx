@@ -1,10 +1,11 @@
 // ============================================================================
-// ЯЧЕЙКА ПЛИТКИ В ИНВЕНТАРЕ (ФИНАЛЬНАЯ ВЕРСИЯ)
+// ЯЧЕЙКА ПЛИТКИ В ИНВЕНТАРЕ (с прямой проверкой крафта)
 // ============================================================================
 
 import React, { useMemo, useCallback, useRef, useEffect } from 'react';
 import { View, StyleSheet, Dimensions } from 'react-native';
 import { GestureDetector } from 'react-native-gesture-handler';
+
 import { Tile } from '../models/Tile';
 import TileView from './TileView';
 import { TEXTURE_MAP, DEFAULT_TEXTURE } from '../constants/textures';
@@ -16,6 +17,12 @@ import {
 } from '../constants/inventory';
 import { useDraggable } from '../hooks/useDraggable';
 import { useTiles } from '../context/TilesContext';
+
+// ============================================================================
+// 🔑 Импорт системы крафта для прямой проверки
+// ============================================================================
+import { CraftingService } from '../services/CraftingService';
+import { CRAFTING_CONFIG } from '../constants/CraftingConfig';
 
 interface InventoryCellProps {
   tile: Tile;
@@ -30,7 +37,17 @@ const InventoryCell: React.FC<InventoryCellProps> = ({
   onTap,
   onDragStart,
 }) => {
-  const { removeFromInventory, addToInventory, setActiveInventoryTileId } = useTiles();
+  // ============================================================================
+  // 🔑 Получаем ВСЕ необходимые методы из контекста (снаружи useCallback)
+  // ============================================================================
+  const { 
+    removeFromInventory, 
+    addToInventory, 
+    setActiveInventoryTileId,
+    getTileAt,
+    addTile: ctxAddTile,
+    removeTile: ctxRemoveTile,
+  } = useTiles();
   
   const placementSuccessRef = useRef(false);
   const textureSource = TEXTURE_MAP[tile.textureKey] || DEFAULT_TEXTURE;
@@ -62,18 +79,77 @@ const InventoryCell: React.FC<InventoryCellProps> = ({
   // ============================================================================
   // КОЛБЭКИ
   // ============================================================================
-  const handlePlaced = useCallback((cell: { col: number; row: number }) => {
+  
+  // 🔑 handlePlaced — с ПРЯМОЙ проверкой крафта через CraftingService
+  const handlePlaced = useCallback((
+    cell: { col: number; row: number },
+    placedTile?: Tile
+  ) => {
     placementSuccessRef.current = true;
     setActiveInventoryTileId(null);
     removeFromInventory(tile.id);
-    console.log(`[InventoryCell] ✅ Placed ${tile.id} at [${cell.col},${cell.row}]`);
-  }, [tile.id, removeFromInventory, setActiveInventoryTileId]);
+    
+    if (__DEV__) {
+      console.log(`[InventoryCell] ✅ Placed ${tile.id} at [${cell.col},${cell.row}]`, {
+        texture: tile.textureKey,
+        activeSide: tile.activeSide,
+      });
+    }
+    
+    // ========================================================================
+    // 🔑 ПРЯМАЯ ПРОВЕРКА КРАФТА (не через onPlaced из App.tsx)
+    // ========================================================================
+    if (CRAFTING_CONFIG.enabled && CRAFTING_CONFIG.checkOnPlace) {
+      if (__DEV__) {
+        console.log(`[InventoryCell] 🔗 Direct craft check for ${tile.id}:`, {
+          texture: tile.textureKey,
+          position: `${cell.col},${cell.row}`,
+          activeSide: tile.activeSide,
+        });
+      }
+      
+      try {
+        const result = CraftingService.onTilePlaced(
+          tile,  // Плитка из инвентаря
+          cell.col,
+          cell.row,
+          getTileAt,  // Функция получения плитки по координатам
+          {
+            // Операции с плитками
+            removeTile: ctxRemoveTile,
+            addTile: ctxAddTile,
+            generateTileId: () => `craft-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+          }
+        );
+        
+        if (__DEV__ && result.crafted) {
+          console.log(`[InventoryCell] ✅ Direct craft succeeded: ${result.results.length} crafts`);
+          result.results.forEach(r => {
+            console.log(`  - ${r.message}`);
+          });
+        }
+      } catch (error) {
+        console.error(`[InventoryCell] ❌ Craft check error:`, error);
+      }
+    }
+  }, [
+    tile, 
+    tile.id, 
+    removeFromInventory, 
+    setActiveInventoryTileId,
+    getTileAt,
+    ctxAddTile,
+    ctxRemoveTile,
+  ]);
   
+  // 🔑 handleReturned — определён!
   const handleReturned = useCallback(() => {
     setActiveInventoryTileId(null);
-    console.log(`[InventoryCell] 🔄 Returned ${tile.id} to inventory`);
-    addToInventory(tile);
-  }, [tile, addToInventory, setActiveInventoryTileId]);
+    if (__DEV__) {
+      console.log(`[InventoryCell] 🔄 Returned ${tile.id} to inventory`);
+    }
+    // Плитка уже в инвентаре, просто сбрасываем состояние
+  }, [tile.id, setActiveInventoryTileId]);
   
   // ============================================================================
   // useDraggable
@@ -82,9 +158,15 @@ const InventoryCell: React.FC<InventoryCellProps> = ({
     tile,
     tile.id,
     initialPosition,
-    handlePlaced,
-    handleReturned,
+    // ========================================================================
+    // 🔑 Колбэк onPlaced — вызывает handlePlaced с двумя аргументами
+    // ========================================================================
+    (cell, placedTile) => {
+      handlePlaced(cell, placedTile);
+    },
+    handleReturned,  // ← Теперь определён!
     'INVENTORY'
+    // onDroppedInInventory не нужен для инвентаря
   );
   
   // ============================================================================
@@ -111,7 +193,8 @@ const InventoryCell: React.FC<InventoryCellProps> = ({
     <View style={styles.cell}>
       <GestureDetector gesture={draggable.gesture}>
         <View style={{ 
-          opacity: draggable.state === 'DRAGGING' ? 0 : 1 }}>
+          opacity: draggable.state === 'DRAGGING' ? 0 : 1 
+        }}>
           <TileView
             textureSource={textureSource}
             position={{ x: 0, y: 0 }}
@@ -120,6 +203,7 @@ const InventoryCell: React.FC<InventoryCellProps> = ({
             tileId={tile.id}
             rotation={tile.rotation}
             isInInventory={true}
+            tile={tile}  // ← Для отрисовки activeSide
             debugLabel={`InventoryCell[${index}]-static`}
           />
         </View>

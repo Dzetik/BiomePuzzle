@@ -161,19 +161,29 @@ const GameContent = () => {
   // ============================================================================
   const handleTilePlacedBase = useCallback((
     cell: { col: number; row: number },
-    placedTile?: Tile  // ← 🔑 НОВОЕ: плитка передаётся из useDraggable
+    placedTile?: Tile
   ) => {
+    // ========================================================================
+    // 🔑 ОТЛАДКА: Логи при вызове
+    // ========================================================================
+    if (__DEV__) {
+      console.log(`[App] 🔥 handleTilePlacedBase CALLED:`, {
+        cell,
+        placedTile: placedTile ? {
+          id: placedTile.id,
+          texture: placedTile.textureKey,
+          activeSide: placedTile.activeSide,
+        } : 'undefined',
+        source: placedTile ? 'from-inventory' : 'from-spawner',
+      });
+    }
+    
     console.log('🔥 [1] handleTilePlacedBase');
     
-    // Оригинальная логика: создание новой плитки в спавнере
-    // (теперь с учётом крафта — плитка может иметь activeSide)
     const newTile = createSpawnerTile();
     if (newTile?.id) {
       activeTileIdRef.current = newTile.id;
-      console.log('🔥 [2] New spawner tile:', newTile.id, {
-        texture: newTile.textureKey,
-        activeSide: newTile.activeSide,
-      });
+      console.log('🔥 [2] New spawner tile:', newTile.id);
     }
   }, [createSpawnerTile]);
 

@@ -239,8 +239,9 @@ export const TilesProvider: React.FC<TilesProviderProps> = ({ children }) => {
     const tileCopy = new Tile({
       id: spawnerTile.id,
       textureKey: spawnerTile.textureKey,
+      activeSide: spawnerTile.activeSide,  
+      rotation: spawnerTile.rotation,       
     });
-    (tileCopy as any)._rotation = spawnerTile.rotation; 
     
     setInventoryTiles(prev => [tileCopy, ...prev]);
     setSpawnerTile(null);

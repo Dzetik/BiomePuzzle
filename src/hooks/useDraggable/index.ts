@@ -41,7 +41,10 @@ export const useDraggable = (
   initialTileData: Tile | null = null,
   tileId: string | null = null,
   externalInitialPosition: { x: number; y: number } | null = null,
-  onPlaced?: (cell: { col: number; row: number }) => void,
+  onPlaced?: (
+    cell: { col: number; row: number },
+    tile?: Tile  
+  ) => void,
   onReturned?: () => void,
   source: 'SPAWNER' | 'INVENTORY' = 'SPAWNER',  
   onDroppedInInventory?: () => void,
