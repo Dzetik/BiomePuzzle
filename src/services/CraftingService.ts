@@ -224,9 +224,13 @@ export class CraftingService {
         // Проверка 1: Текстура совпадает?
         if (neighborTile.textureKey !== expectedTexture) continue;
         
-        // Проверка 2: Указывает ли activeSide соседа НА текущую позицию?
-        // (т.е. сосед "смотрит" на плитку следующего шага)
-        if (!doesActiveSidePointTo(neighborTile, neighbor.col, neighbor.row, currentCol, currentRow)) {
+        // ======================================================================
+        // 🔑 ИСПРАВЛЕНИЕ: Проверка относительной связи
+        // ======================================================================
+        // Вместо проверки конкретного направления (right/top/etc),
+        // проверяем: указывает ли activeSide соседа НА текущую позицию?
+        // ======================================================================
+        if (!this.doesActiveSidePointTo(neighborTile, neighbor.col, neighbor.row, currentCol, currentRow)) {
           continue;
         }
         
@@ -241,7 +245,7 @@ export class CraftingService {
           sequenceIndex: step,
         });
         
-        // Переходим к следующей итерации (теперь ищем пред-предыдущий шаг)
+        // Переходим к следующей итерации
         currentCol = neighbor.col;
         currentRow = neighbor.row;
         found = true;
@@ -258,7 +262,6 @@ export class CraftingService {
     // ✅ Вся цепочка валидна! Сортируем по порядку рецепта (0, 1, 2...)
     matchedTiles.sort((a, b) => a.sequenceIndex - b.sequenceIndex);
     
-    // Вычисляем позицию для результата
     const resultPosition = this.calculateResultPosition(recipe, matchedTiles);
     
     return {
@@ -267,6 +270,43 @@ export class CraftingService {
       resultPosition,
     };
   }
+
+  // ============================================================================
+  // 🔑 ИСПРАВЛЕННЫЙ МЕТОД: Проверка — указывает ли activeSide НА целевую ячейку
+  // ============================================================================
+  private static doesActiveSidePointTo(
+    tile: Tile,
+    tileCol: number,
+    tileRow: number,
+    targetCol: number,
+    targetRow: number
+  ): boolean {
+    // Если у плитки нет activeSide — она не может участвовать в упорядоченных рецептах
+    const activeSide = (tile as any).activeSide as Edge | undefined;
+    if (!activeSide) return false;
+    
+    // Вычисляем куда "смотрит" activeSide с учётом поворота плитки
+    const edges: Edge[] = ['top', 'right', 'bottom', 'left'];
+    const baseIndex = edges.indexOf(activeSide);
+    const steps = tile.rotation / 90;
+    const finalIndex = (baseIndex + steps) % 4;
+    const finalEdge = edges[finalIndex];
+    
+    // Вычисляем целевую позицию на основе finalEdge
+    let expectedTargetCol = tileCol;
+    let expectedTargetRow = tileRow;
+    
+    switch (finalEdge) {
+      case 'top': expectedTargetRow--; break;
+      case 'bottom': expectedTargetRow++; break;
+      case 'left': expectedTargetCol--; break;
+      case 'right': expectedTargetCol++; break;
+    }
+    
+    // Сравниваем с целевой позицией
+    return expectedTargetCol === targetCol && expectedTargetRow === targetRow;
+  }
+
   
   // --------------------------------------------------------------------------
   // ПРИВАТНЫЙ МЕТОД: Расчёт позиции для результирующей плитки
@@ -547,9 +587,9 @@ export class CraftingService {
     return { recipe, matchedTiles, resultPosition };
   }
   
-  // --------------------------------------------------------------------------
-  // ПРИВАТНЫЙ МЕТОД: Поиск следующего шага в цепочке (вперёд)
-  // --------------------------------------------------------------------------
+  // ============================================================================
+  // 🔑 ИСПРАВЛЕННЫЙ МЕТОД: Поиск следующего шага в цепочке (вперёд)
+  // ============================================================================
   private static findNextInChain(
     expectedTexture: string,
     fromCol: number,
@@ -565,21 +605,20 @@ export class CraftingService {
       
       const neighborTile = neighborInfo.tile;
       
-      // Проверки
+      // Проверка 1: Текстура совпадает?
       if (neighborTile.textureKey !== expectedTexture) continue;
+      
+      // Проверка 2: Плитка ещё не использована?
       if (excludeTiles.some(m => m.tile.id === neighborTile.id)) continue;
       
-      // 🔑 Ключевое: активная сторона ТЕКУЩЕЙ плитки должна указывать НА соседа
-      // (потому что мы идём вперёд по цепочке: текущая → следующая)
-      if (!doesActiveSidePointTo(neighborTile, neighbor.col, neighbor.row, fromCol, fromRow)) {
-        // Проверяем обратное: может текущая плитка указывает на соседа?
-        // Нет, для движения вперёд нужно: fromTile.activeSide → neighbor
-        const fromTileInfo = getTileAt(fromCol, fromRow);
-        if (!fromTileInfo) continue;
-        
-        if (!doesActiveSidePointTo(fromTileInfo.tile, fromCol, fromRow, neighbor.col, neighbor.row)) {
-          continue;
-        }
+      // ======================================================================
+      // 🔑 Ключевое: activeSide ТЕКУЩЕЙ плитки должна указывать НА соседа
+      // ======================================================================
+      const fromTileInfo = getTileAt(fromCol, fromRow);
+      if (!fromTileInfo) continue;
+      
+      if (!this.doesActiveSidePointTo(fromTileInfo.tile, fromCol, fromRow, neighbor.col, neighbor.row)) {
+        continue;
       }
       
       return { tile: neighborTile, col: neighbor.col, row: neighbor.row };
@@ -588,9 +627,9 @@ export class CraftingService {
     return null;
   }
   
-  // --------------------------------------------------------------------------
-  // ПРИВАТНЫЙ МЕТОД: Поиск предыдущего шага в цепочке (назад)
-  // --------------------------------------------------------------------------
+  // ============================================================================
+  // 🔑 ИСПРАВЛЕННЫЙ МЕТОД: Поиск предыдущего шага в цепочке (назад)
+  // ============================================================================
   private static findPrevInChain(
     expectedTexture: string,
     fromCol: number,
@@ -610,9 +649,10 @@ export class CraftingService {
       if (neighborTile.textureKey !== expectedTexture) continue;
       if (excludeTiles.some(m => m.tile.id === neighborTile.id)) continue;
       
-      // 🔑 Ключевое: активная сторона СОСЕДА должна указывать НА текущую плитку
-      // (потому что мы идём назад: предыдущая → текущая, значит prev.activeSide → current)
-      if (!doesActiveSidePointTo(neighborTile, neighbor.col, neighbor.row, fromCol, fromRow)) {
+      // ======================================================================
+      // 🔑 Ключевое: activeSide СОСЕДА должна указывать НА текущую плитку
+      // ======================================================================
+      if (!this.doesActiveSidePointTo(neighborTile, neighbor.col, neighbor.row, fromCol, fromRow)) {
         continue;
       }
       
@@ -621,7 +661,7 @@ export class CraftingService {
     
     return null;
   }
-  
+
   // --------------------------------------------------------------------------
   // ПУБЛИЧНЫЙ МЕТОД: Полная обработка размещения плитки
   // --------------------------------------------------------------------------
