@@ -42,7 +42,7 @@ export const SPAWNER_CONFIG = {
       borderColor: 'rgba(76, 175, 80, 0.15)',
       
       // Толщина границы
-      borderWidth: 2,
+      borderWidth: 4,
       
       // Стиль границы: 'solid', 'dashed', 'dotted'
       borderStyle: 'dashed',

@@ -1,11 +1,12 @@
 // ============================================================================
-// КОНТЕКСТ УПРАВЛЕНИЯ ПЛИТКАМИ (с поддержкой инвентаря)
+// КОНТЕКСТ УПРАВЛЕНИЯ ПЛИТКАМИ (с синхронизацией GridService)
 // ============================================================================
 
-import React, { createContext, useContext, useState, useCallback, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useCallback, ReactNode, useRef } from 'react';
 import { Tile } from '../models/Tile';
 import { getRandomTileDefinition } from '../data/tileDefinitions';
 import { INVENTORY_MAX_SLOTS } from '../constants/inventory';
+import { GridService } from '../services/GridService';
 
 // ============================================================================
 // ТИПЫ
@@ -35,6 +36,12 @@ export interface TilesContextType {
   getTileAt: (col: number, row: number) => PlacedTileInfo | undefined;
   getOccupiedBounds: () => { minCol: number; maxCol: number; minRow: number; maxRow: number } | null;
   
+  // Атомарное обновление для крафта
+  craftTiles: (
+    removeIds: string[],
+    addInfo: { col: number; row: number; tile: Tile }
+  ) => void;
+  
   // Инвентарь
   inventoryTiles: Tile[];
   addToInventory: (tile: Tile) => boolean;
@@ -45,7 +52,7 @@ export interface TilesContextType {
   getInventoryFreeSlots: () => number;
   clearInventory: () => void;
   
-  // 🔑 НОВОЕ: Активная плитка (которую тащат)
+  // Активная плитка
   activeInventoryTileId: string | null;
   setActiveInventoryTileId: (id: string | null) => void;
 }
@@ -65,35 +72,15 @@ interface TilesProviderProps {
 }
 
 export const TilesProvider: React.FC<TilesProviderProps> = ({ children }) => {
-  // --------------------------------------------------------------------------
-  // 1. СОСТОЯНИЕ: СПАВНЕР
-  // --------------------------------------------------------------------------
   const [spawnerTile, setSpawnerTile] = useState<Tile | null>(null);
-  
-  // --------------------------------------------------------------------------
-  // 2. СОСТОЯНИЕ: РАЗМЕЩЁННЫЕ ПЛИТКИ (ГРИД)
-  // --------------------------------------------------------------------------
   const [placedTiles, setPlacedTiles] = useState<Map<string, PlacedTileInfo>>(new Map());
-  
-  // --------------------------------------------------------------------------
-  // 3. СОСТОЯНИЕ: ИНВЕНТАРЬ
-  // --------------------------------------------------------------------------
   const [inventoryTiles, setInventoryTiles] = useState<Tile[]>([]);
-  
-  // --------------------------------------------------------------------------
-  // 4. 🔑 НОВОЕ: СОСТОЯНИЕ: АКТИВНАЯ ПЛИТКА ИНВЕНТАРЯ
-  // --------------------------------------------------------------------------
   const [activeInventoryTileId, setActiveInventoryTileId] = useState<string | null>(null);
   
-  // ============================================================================
-  // 🔍 ОТЛАДКА: Лог изменений активной плитки
-  // ============================================================================
-  if (__DEV__ && activeInventoryTileId) {
-    console.log(`[TilesContext] 🎯 Active inventory tile:`, activeInventoryTileId);
-  }
+  const placedTilesRef = useRef<Map<string, PlacedTileInfo>>(new Map());
   
   // --------------------------------------------------------------------------
-  // 5. МЕТОДЫ: СПАВНЕР
+  // МЕТОДЫ: СПАВНЕР
   // --------------------------------------------------------------------------
   
   const createSpawnerTile = useCallback((tile?: Tile): Tile => {
@@ -116,22 +103,19 @@ export const TilesProvider: React.FC<TilesProviderProps> = ({ children }) => {
     return newTile;
   }, []);
   
-  const getSpawnerTile = useCallback(() => {
-    return spawnerTile;
-  }, [spawnerTile]);
-  
-  const clearSpawnerTile = useCallback(() => {
-    setSpawnerTile(null);
-  }, []);
+  const getSpawnerTile = useCallback(() => spawnerTile, [spawnerTile]);
+  const clearSpawnerTile = useCallback(() => setSpawnerTile(null), []);
   
   // --------------------------------------------------------------------------
-  // 6. МЕТОДЫ: РАЗМЕЩЁННЫЕ ПЛИТКИ
+  // МЕТОДЫ: РАЗМЕЩЁННЫЕ ПЛИТКИ (с синхронизацией GridService)
   // --------------------------------------------------------------------------
   
   const addTile = useCallback((col: number, row: number, tile: Tile) => {
     setPlacedTiles(prev => {
       const newMap = new Map(prev);
       newMap.set(tile.id, { tile, col, row });
+      placedTilesRef.current = newMap;
+      GridService.occupyCell(col, row, tile.id);
       return newMap;
     });
   }, []);
@@ -139,95 +123,105 @@ export const TilesProvider: React.FC<TilesProviderProps> = ({ children }) => {
   const removeTile = useCallback((tileId: string) => {
     setPlacedTiles(prev => {
       const newMap = new Map(prev);
+      const entry = newMap.get(tileId);
       newMap.delete(tileId);
+      placedTilesRef.current = newMap;
+      if (entry) {
+        GridService.releaseCell(entry.col, entry.row);
+      }
       return newMap;
     });
   }, []);
   
-  const getAllTiles = useCallback(() => {
-    return Array.from(placedTiles.values());
-  }, [placedTiles]);
+  // ============================================================================
+  // Атомарное обновление для крафта (с синхронизацией GridService)
+  // ============================================================================
+  const craftTiles = useCallback((
+    removeIds: string[],
+    addInfo: { col: number; row: number; tile: Tile }
+  ) => {
+    setPlacedTiles(prev => {
+      const newMap = new Map(prev);
+      
+      // Удаляем ингредиенты и освобождаем ячейки в GridService
+      for (const id of removeIds) {
+        const entry = newMap.get(id);
+        if (entry) {
+          GridService.releaseCell(entry.col, entry.row);
+          newMap.delete(id);
+        }
+      }
+      
+      // Добавляем результат и занимаем ячейку в GridService
+      newMap.set(addInfo.tile.id, {
+        tile: addInfo.tile,
+        col: addInfo.col,
+        row: addInfo.row,
+      });
+      GridService.occupyCell(addInfo.col, addInfo.row, addInfo.tile.id);
+      
+      placedTilesRef.current = newMap;
+      return newMap;
+    });
+  }, []);
+  
+  const getAllTiles = useCallback(() => Array.from(placedTiles.values()), [placedTiles]);
   
   const isCellFree = useCallback((col: number, row: number): boolean => {
-    for (const [, info] of placedTiles) {
-      if (info.col === col && info.row === row) {
-        return false;
-      }
+    for (const [, info] of placedTilesRef.current) {
+      if (info.col === col && info.row === row) return false;
     }
     return true;
-  }, [placedTiles]);
+  }, []);
 
   const isCellOccupied = useCallback((col: number, row: number): boolean => {
     return !isCellFree(col, row);
   }, [isCellFree]);
 
   const getTileAt = useCallback((col: number, row: number): PlacedTileInfo | undefined => {
-    for (const [key, info] of placedTiles) {
-      if (info.col === col && info.row === row) {
-        return info;
-      }
+    for (const [, info] of placedTilesRef.current) {
+      if (info.col === col && info.row === row) return info;
     }
     return undefined;
-  }, [placedTiles]);
+  }, []);
 
   const getOccupiedBounds = useCallback(() => {
-    if (placedTiles.size === 0) {
-      return null;
-    }
+    if (placedTiles.size === 0) return null;
     
-    let minCol = Infinity;
-    let maxCol = -Infinity;
-    let minRow = Infinity;
-    let maxRow = -Infinity;
-    
+    let minCol = Infinity, maxCol = -Infinity, minRow = Infinity, maxRow = -Infinity;
     for (const [, info] of placedTiles) {
       minCol = Math.min(minCol, info.col);
       maxCol = Math.max(maxCol, info.col);
       minRow = Math.min(minRow, info.row);
       maxRow = Math.max(maxRow, info.row);
     }
-    
     return { minCol, maxCol, minRow, maxRow };
   }, [placedTiles]);
   
   // --------------------------------------------------------------------------
-  // 7. МЕТОДЫ: ИНВЕНТАРЬ
+  // МЕТОДЫ: ИНВЕНТАРЬ
   // --------------------------------------------------------------------------
   
   const addToInventory = useCallback((tile: Tile): boolean => {
     if (inventoryTiles.length >= INVENTORY_MAX_SLOTS) {
-      console.warn('[TilesContext] ❌ Инвентарь полон, нельзя добавить плитку');
+      console.warn('[TilesContext] ❌ Инвентарь полон');
       return false;
     }
-    
     setInventoryTiles(prev => [tile, ...prev]);
     return true;
   }, [inventoryTiles.length]);
   
   const removeFromInventory = useCallback((tileId: string) => {
     setInventoryTiles(prev => prev.filter(t => t.id !== tileId));
-    console.log(`[TilesContext] 🗑️ Плитка ${tileId} удалена из инвентаря`);
   }, []);
   
-  const getInventoryTile = useCallback((tileId: string): Tile | undefined => {
-    return inventoryTiles.find(t => t.id === tileId);
-  }, [inventoryTiles]);
+  const getInventoryTile = useCallback((tileId: string): Tile | undefined => 
+    inventoryTiles.find(t => t.id === tileId), [inventoryTiles]);
   
-  const getInventoryTiles = useCallback(() => {
-    return inventoryTiles;
-  }, [inventoryTiles]);
-  
-  const isInventoryFull = useCallback(() => {
-    return inventoryTiles.length >= INVENTORY_MAX_SLOTS;
-  }, [inventoryTiles.length]);
-  
-  const getInventoryFreeSlots = useCallback(() => {
-    return Math.max(0, INVENTORY_MAX_SLOTS - inventoryTiles.length);
-  }, [inventoryTiles.length]);
-  
-  const clearInventory = useCallback(() => {
-    setInventoryTiles([]);
-  }, []);
+  const getInventoryTiles = useCallback(() => inventoryTiles, [inventoryTiles]);
+  const isInventoryFull = useCallback(() => inventoryTiles.length >= INVENTORY_MAX_SLOTS, [inventoryTiles.length]);
+  const getInventoryFreeSlots = useCallback(() => Math.max(0, INVENTORY_MAX_SLOTS - inventoryTiles.length), [inventoryTiles.length]);
+  const clearInventory = useCallback(() => setInventoryTiles([]), []);
 
   // ============================================================================
   // МЕТОД: ПЕРЕМЕЩЕНИЕ ПЛИТКИ ИЗ СПАВНЕРА В ИНВЕНТАРЬ
@@ -237,7 +231,6 @@ export const TilesProvider: React.FC<TilesProviderProps> = ({ children }) => {
       console.warn('[TilesContext] ❌ Нет плитки в спавнере');
       return false;
     }
-    
     if (inventoryTiles.length >= INVENTORY_MAX_SLOTS) {
       console.warn('[TilesContext] ❌ Инвентарь полон');
       return false;
@@ -247,29 +240,25 @@ export const TilesProvider: React.FC<TilesProviderProps> = ({ children }) => {
       id: spawnerTile.id,
       textureKey: spawnerTile.textureKey,
     });
-
     (tileCopy as any)._rotation = spawnerTile.rotation; 
     
     setInventoryTiles(prev => [tileCopy, ...prev]);
     setSpawnerTile(null);
     
-    console.log(`[TilesContext] ✅ Плитка ${spawnerTile.id} перемещена в инвентарь (копия)`);
     return true;
   }, [spawnerTile, inventoryTiles.length]);
   
   // --------------------------------------------------------------------------
-  // 8. ЗНАЧЕНИЕ КОНТЕКСТА
+  // ЗНАЧЕНИЕ КОНТЕКСТА
   // --------------------------------------------------------------------------
   
   const contextValue: TilesContextType = {
-    // Спавнер
     spawnerTile,
     createSpawnerTile,
     getSpawnerTile,
     clearSpawnerTile,
     moveSpawnerTileToInventory,
     
-    // Размещённые плитки
     placedTiles,
     addTile,
     removeTile,
@@ -279,7 +268,8 @@ export const TilesProvider: React.FC<TilesProviderProps> = ({ children }) => {
     getTileAt,
     getOccupiedBounds,
     
-    // Инвентарь
+    craftTiles,
+    
     inventoryTiles,
     addToInventory,
     removeFromInventory,
@@ -289,7 +279,6 @@ export const TilesProvider: React.FC<TilesProviderProps> = ({ children }) => {
     getInventoryFreeSlots,
     clearInventory,
     
-    // 🔑 НОВОЕ: Активная плитка
     activeInventoryTileId,
     setActiveInventoryTileId,
   };

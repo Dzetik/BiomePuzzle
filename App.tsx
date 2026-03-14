@@ -105,6 +105,7 @@ const GameContent = () => {
     addTile,
     removeTile,
     getTileAt,
+    craftTiles,
   } = useTiles();
   
   const spawnerPos = useSpawner();
@@ -184,6 +185,7 @@ const GameContent = () => {
     getTileAt,
     addTile,
     removeTile,
+    craftTiles,
     generateTileId: () => `craft-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     
     // Колбэки для визуальной обратной связи

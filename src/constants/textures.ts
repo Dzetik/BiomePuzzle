@@ -27,6 +27,7 @@ import fire from '../../assets/images/textures/item-tile/fire.png';
 import millet from '../../assets/images/textures/item-tile/millet.png';
 import toast from '../../assets/images/textures/item-tile/toast.png';
 import water from '../../assets/images/textures/item-tile/water.png';
+import juice from '../../assets/images/textures/item-tile/juice.png';
 
 export const TEXTURE_MAP: Record<string, any> = {
   sprite1: sprite1,
@@ -58,6 +59,7 @@ export const TEXTURE_MAP: Record<string, any> = {
   millet: millet,
   toast: toast,
   water: water,
+  juice: juice,
 };
 
 export const DEFAULT_TEXTURE = apple;

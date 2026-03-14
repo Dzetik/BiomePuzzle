@@ -30,38 +30,30 @@ class GridServiceClass {
     this.config = config;
   }
 
-  /**
-   * Найти ячейку по координатам (формула из gridUtils.js)
-   */
   findCellAtPosition(
     x: number,
     y: number,
     tileSize: number = DEFAULT_TILE_SIZE.width
   ): GridCell | null {
     if (!this.config) {
-      console.log('[GridService] ❌ Not configured!');
       return null;
     }
 
     const { gridOffset, scale, gridBounds } = this.config;
     
-    // 🔥 Формула из gridUtils.js: масштабируем base offset и cell size
     const scaledCellSize = BASE_GRID.CELL_SIZE * scale;
     const baseOffsetX = BASE_GRID_OFFSET.x * scale;
     const baseOffsetY = BASE_GRID_OFFSET.y * scale;
 
-    // 🔥 Центр плитки (tileSize уже масштабируется в useDraggable)
     const centerX = x + tileSize / 2;
     const centerY = y + tileSize / 2;
 
-    // 🔥 Формула из findNearestCell: (center + offset - baseOffset) / cellSize
     const gridX = (centerX + gridOffset.x - baseOffsetX) / scaledCellSize;
     const gridY = (centerY + gridOffset.y - baseOffsetY) / scaledCellSize;
 
     const col = Math.floor(gridX);
     const row = Math.floor(gridY);
 
-    // Проверяем границы
     if (
       col < gridBounds.startCol ||
       col > gridBounds.endCol ||
@@ -71,7 +63,6 @@ class GridServiceClass {
       return null;
     }
 
-    // Вычисляем позицию для анимации
     const snapPos = this.getSnapPosition(col, row, tileSize);
     if (!snapPos) return null;
 
@@ -106,15 +97,19 @@ class GridServiceClass {
     }
   }
 
-  /**
-   * Получить позицию для привязки к ячейке
-   * 🔥 ИСПРАВЛЕНО: tileSize уже включает scale
-   */
+  syncOccupiedCells(placedTiles: Map<string, { tile: any; col: number; row: number }>) {
+    this.occupiedCells.clear();
+    for (const [tileId, info] of placedTiles) {
+      const key = `${info.col},${info.row}`;
+      this.occupiedCells.set(key, tileId);
+    }
+  }
+
   getSnapPosition(
     col: number,
     row: number,
-    tileSize: number = DEFAULT_TILE_SIZE.width  // ← Базовый размер (90)
-    ): { x: number; y: number } | null {
+    tileSize: number = DEFAULT_TILE_SIZE.width
+  ): { x: number; y: number } | null {
     if (!this.config) return null;
 
     const { gridOffset, scale } = this.config;
@@ -123,25 +118,15 @@ class GridServiceClass {
     const baseOffsetX = BASE_GRID_OFFSET.x * scale;
     const baseOffsetY = BASE_GRID_OFFSET.y * scale;
 
-    // Центр ячейки
     const centerX = baseOffsetX + col * scaledCellSize + scaledCellSize / 2 - gridOffset.x;
     const centerY = baseOffsetY + row * scaledCellSize + scaledCellSize / 2 - gridOffset.y;
 
-    // 🔥 Масштабируем базовый размер плитки
-    const scaledTileSize = tileSize * scale;  // 90 * 0.84 = 75.6
+    const scaledTileSize = tileSize * scale;
     const x = centerX - scaledTileSize / 2;
     const y = centerY - scaledTileSize / 2;
 
-    console.log('[GridService] 🎯 Snap position:', {
-        col, row, scale,
-        tileSize,           // Базовый: 90
-        scaledTileSize,     // Масштабированный: 75.6
-        computedX: x,
-        computedY: y,
-    });
-
     return { x, y };
-    }
+  }
 }
 
 export const GridService = new GridServiceClass();

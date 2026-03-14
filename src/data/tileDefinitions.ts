@@ -12,6 +12,17 @@ export const TILE_DEFINITIONS: TileData[] = [
     },
     activeSide: 'top',
   },
+  {
+    id: 'juice',
+    textureKey: 'juice',
+    baseEdges: {
+      top: '#4A7C23',      // Зелёный
+      right: '#4A7C23',
+      bottom: '#4A7C23',
+      left: '#4A7C23',
+    },
+    activeSide: 'top',
+  },
   /*{
     id: 'bread',
     textureKey: 'bread',

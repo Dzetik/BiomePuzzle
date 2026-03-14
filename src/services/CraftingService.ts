@@ -309,45 +309,52 @@ export class CraftingService {
       removeTile: (tileId: string) => void;
       addTile: (col: number, row: number, tile: Tile) => void;
       generateTileId: () => string;
+      craftTiles?: (removeIds: string[], addInfo: { col: number; row: number; tile: Tile }) => void;
     },
     callbacks?: CraftingCallbacks
   ): CraftResult {
     const { recipe, matchedTiles, resultPosition } = match;
-    const { removeTile, addTile, generateTileId } = tileOperations;
+    const { removeTile, addTile, generateTileId, craftTiles } = tileOperations;
     
-    // 1. Уведомление о начале крафта
     callbacks?.onCraftStart?.(recipe, matchedTiles);
     
-    // 2. Удалить все ингредиенты
-    const removedIds: string[] = [];
-    for (const mt of matchedTiles) {
-      removeTile(mt.tile.id);
-      removedIds.push(mt.tile.id);
-      if (__DEV__) console.log(`[Crafting] 🗑️ Удалён ингредиент: ${mt.tile.id} (${mt.tile.textureKey})`);
-    }
+    // Собираем ID удаляемых плиток
+    const removedIds: string[] = matchedTiles.map(mt => mt.tile.id);
     
-    // 3. Создать результирующую плитку
+    // Создаём результирующую плитку
     const resultTile = new Tile({
       id: generateTileId(),
       textureKey: recipe.result.textureKey,
       rotation: recipe.result.rotation ?? 0,
-      // activeSide будет установлен ниже
     });
     
-    // Установить activeSide если указано в рецепте
     if (recipe.result.activeSide) {
       (resultTile as any).activeSide = recipe.result.activeSide;
     }
     
-    // 4. Добавить результат на поле
-    addTile(resultPosition.col, resultPosition.row, resultTile);
+    // ========================================================================
+    // 🔑 АТОМАРНОЕ ОБНОВЛЕНИЕ — всё за один вызов!
+    // ========================================================================
+    if (craftTiles) {
+      // Используем новый метод
+      craftTiles(removedIds, {
+        col: resultPosition.col,
+        row: resultPosition.row,
+        tile: resultTile,
+      });
+    } else {
+      // Fallback на старый метод (с задержкой)
+      for (const id of removedIds) {
+        removeTile(id);
+      }
+      setTimeout(() => {
+        addTile(resultPosition.col, resultPosition.row, resultTile);
+      }, 50);
+    }
     
-    if (__DEV__) console.log(`[Crafting] ✨ Создан результат: ${resultTile.id} (${recipe.result.textureKey}) на ${resultPosition.col},${resultPosition.row}`);
-    
-    // 5. Определить: нужно ли проверять цепочку дальше?
-    const chainEnabled = recipe.chaining?.enabled ?? false;
-    const chainContinues = chainEnabled && getRecipesWhereTextureIsNotLast(recipe.result.textureKey).length > 0;
-    
+    // ========================================================================
+    // Колбэки
+    // ========================================================================
     const result: CraftResult = {
       success: true,
       recipeId: recipe.id,
@@ -357,11 +364,10 @@ export class CraftingService {
         col: resultPosition.col,
         row: resultPosition.row,
       },
-      chainContinues,
+      chainContinues: recipe.chaining?.enabled ?? false,
       message: `Crafted ${recipe.result.textureKey} from ${recipe.sequence.join(' → ')}`,
     };
     
-    // 6. Уведомление о завершении
     callbacks?.onCraftComplete?.(result);
     
     return result;
@@ -632,6 +638,10 @@ export class CraftingService {
       removeTile: (tileId: string) => void;
       addTile: (col: number, row: number, tile: Tile) => void;
       generateTileId: () => string;
+      craftTiles?: (  // ← 🔑 НОВОЕ: опциональный метод
+        removeIds: string[],
+        addInfo: { col: number; row: number; tile: Tile }
+      ) => void;
     },
     callbacks?: CraftingCallbacks
   ): { crafted: boolean; results: CraftResult[] } {
