@@ -1,14 +1,23 @@
 // ========================================
-// ГЛАВНЫЙ ФАЙЛ ПРИЛОЖЕНИЯ (ФИНАЛЬНЫЙ)
+// ГЛАВНЫЙ ФАЙЛ ПРИЛОЖЕНИЯ (С УЧЁТОМ СТАТУС-БАРА)
 // ========================================
 import React, { useEffect, useState, useCallback, useMemo, useRef } from 'react';
-import { View, StyleSheet, StatusBar, LogBox, Text } from 'react-native';
+import {
+  View,
+  StyleSheet,
+  StatusBar,
+  LogBox,
+  Text,
+  TouchableOpacity,
+  Platform,
+} from 'react-native';
 import { GestureHandlerRootView, GestureDetector, Gesture } from 'react-native-gesture-handler';
 
 import TileView from './src/components/TileView';
 import GridView from './src/components/GridView';
 import SpawnerCellView from './src/components/SpawnerCellView';
 import InventoryStrip from './src/components/InventoryStrip';
+import RecipeBook from './src/components/RecipeBook';
 
 import useDraggable from './src/hooks/useDraggable';
 import { useZoom, ZoomProvider } from './src/hooks/useZoom';
@@ -27,7 +36,7 @@ import { TEXTURE_MAP, DEFAULT_TEXTURE } from './src/constants/textures';
 import { useCrafting } from './src/hooks/useCrafting';
 import { CRAFTING_CONFIG } from './src/constants/CraftingConfig';
 import { CraftResult } from './src/services/CraftingService';
-import { Tile } from './src/models';
+import { Tile } from './src/models/Tile';
 
 if (__DEV__) {
   LogBox.ignoreLogs([
@@ -35,6 +44,11 @@ if (__DEV__) {
     /Encountered two children with the same key/,
   ]);
 }
+
+// ============================================================================
+// 🔑 КОНСТАНТА: Высота статус-бара
+// ============================================================================
+const STATUS_BAR_HEIGHT = Platform.OS === 'ios' ? 47 : StatusBar.currentHeight || 25;
 
 // ========================================
 // ZoomHandler
@@ -82,7 +96,6 @@ const PlacedTiles = () => {
             height={cellSize * scale}
             tileId={tile.id}
             rotation={tile.rotation}
-            // 🔑 Передаём объект tile для отрисовки activeSide (стрелки)
             tile={tile}
             debugLabel={`Placed[${entry.col},${entry.row}]`}
           />
@@ -120,6 +133,8 @@ const GameContent = () => {
     message?: string;
     recipeId?: string;
   }>({ active: false });
+  
+  const [showRecipeBook, setShowRecipeBook] = useState(false);
 
   // Инициализация спавнера
   useEffect(() => {
@@ -157,15 +172,12 @@ const GameContent = () => {
   const initialPosition = useMemo(() => getInitialPosition(), [getInitialPosition, spawnerTile?.id]); 
 
   // ============================================================================
-  // 🔑 БАЗОВЫЙ колбэк размещения (только оригинальная логика)
+  // 🔑 БАЗОВЫЙ колбэк размещения
   // ============================================================================
   const handleTilePlacedBase = useCallback((
     cell: { col: number; row: number },
     placedTile?: Tile
   ) => {
-    // ========================================================================
-    // 🔑 ОТЛАДКА: Логи при вызове
-    // ========================================================================
     if (__DEV__) {
       console.log(`[App] 🔥 handleTilePlacedBase CALLED:`, {
         cell,
@@ -188,17 +200,15 @@ const GameContent = () => {
   }, [createSpawnerTile]);
 
   // ============================================================================
-  // 🔑 ОБЁРТЫВАЕМ базовый колбэк через useCrafting
+  // 🔑 ОБЁРТЫВАЕМ через useCrafting
   // ============================================================================
   const handleTilePlaced = useCrafting(handleTilePlacedBase, {
-    // Зависимости из контекста
     getTileAt,
     addTile,
     removeTile,
     craftTiles,
     generateTileId: () => `craft-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     
-    // Колбэки для визуальной обратной связи
     onCraftStart: (recipeId: string, ingredientIds: string[]) => {
       if (__DEV__) console.log(`[App] ✨ Крафт начался: ${recipeId}`, { ingredientIds });
       setCraftFeedback({ active: true, recipeId, message: 'Крафт...' });
@@ -219,7 +229,7 @@ const GameContent = () => {
     onChainStart: (resultTile, depth) => {
       if (__DEV__) console.log(`[App] 🔗 Цепочка шаг ${depth}: ${resultTile.textureKey}`);
     },
-});
+  });
 
   const handleDroppedInInventory = useCallback(() => {
     if (__DEV__) console.log('[App] 📦 Dropped to inventory');
@@ -265,10 +275,40 @@ const GameContent = () => {
 
   return (
     <View style={styles.gameContainer}>
+      {/* ==================================================================== */}
+      {/* 🔑 Плашка статус-бара */}
+      {/* ==================================================================== */}
+      <View style={styles.statusBarPlaceholder}>
+        <StatusBar barStyle="light-content" backgroundColor="#1a1a1a" />
+        {/* ==================================================================== */}
+        {/* 🔑 НОВОЕ: Белая линия по нижней границе */}
+        {/* ==================================================================== */}
+        <View style={styles.statusBarBottomBorder} />
+      </View>
+
       <GridView />
       <SpawnerCellView />
       <PlacedTiles />
       <InventoryStrip />
+
+      {/* ==================================================================== */}
+      {/* 🔑 КНОПКА ОТКРЫТИЯ КНИГИ РЕЦЕПТОВ — над спавнером */}
+      {/* ==================================================================== */}
+      <TouchableOpacity
+        style={styles.recipeBookButton}
+        onPress={() => setShowRecipeBook(true)}
+        activeOpacity={0.7}
+      >
+        <Text style={styles.recipeBookButtonText}>📖 Рецепты</Text>
+      </TouchableOpacity>
+
+      {/* ==================================================================== */}
+      {/* 🔑 МОДАЛЬНОЕ ОКНО КНИГИ РЕЦЕПТОВ */}
+      {/* ==================================================================== */}
+      <RecipeBook
+        visible={showRecipeBook}
+        onClose={() => setShowRecipeBook(false)}
+      />
 
       {/* Фидбек крафта */}
       {CRAFTING_CONFIG.animateMerge && craftFeedback.active && (
@@ -320,7 +360,6 @@ const GameContent = () => {
 const App = () => {
   return (
     <GestureHandlerRootView style={styles.container}>
-      <StatusBar hidden={true} />
       <ZoomProvider>
         <GridProvider>
           <TilesProvider>
@@ -334,6 +373,9 @@ const App = () => {
   );
 };
 
+// ============================================================================
+// СТИЛИ
+// ============================================================================
 const styles = StyleSheet.create({
   container: { 
     flex: 1, 
@@ -343,6 +385,31 @@ const styles = StyleSheet.create({
   gameContainer: { 
     flex: 1,
     overflow: 'visible',
+  },
+  // ============================================================================
+  // 🔑 Плашка статус-бара
+  // ============================================================================
+  statusBarPlaceholder: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    height: STATUS_BAR_HEIGHT,
+    backgroundColor: '#1a1a1a',
+    zIndex: 100000,
+    elevation: 100,
+  },
+  // ============================================================================
+  // 🔑 НОВОЕ: Белая линия по нижней границе плашки
+  // ============================================================================
+  statusBarBottomBorder: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    height: 1,
+    backgroundColor: '#ffffff',
+    opacity: 0.3,  // Полупрозрачная белая линия
   },
   craftFeedback: {
     position: 'absolute',
@@ -362,6 +429,28 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
     elevation: 10,
+  },
+  // ============================================================================
+  // 🔑 ИЗМЕНЕНО: Кнопка рецептов — угловая с скруглёнными краями
+  // ============================================================================
+  recipeBookButton: {
+    position: 'absolute',
+    // 🔑 Позиция: над спавнером (справа вверху)
+    top: STATUS_BAR_HEIGHT + 4,
+    right: 19,  // Было: left: 10 → Стало: right: 15 ✅
+    backgroundColor: 'rgba(100, 100, 150, 0.9)',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
+    zIndex: 99999,
+    elevation: 99,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.3)',
+  },
+  recipeBookButtonText: {
+    color: '#fff',
+    fontSize: 13,
+    fontWeight: '600',
   },
 });
 
