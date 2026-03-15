@@ -19,9 +19,14 @@ import SpawnerCellView from './src/components/SpawnerCellView';
 import InventoryStrip from './src/components/InventoryStrip';
 import RecipeBook from './src/components/RecipeBook';
 // ============================================================================
-// 🔑 НОВОЕ: Импорт модального окна действий
+// 🔑 Импорт модального окна действий
 // ============================================================================
 import { PlacedTileActionModal } from './src/components/PlacedTileActionModal';
+// ============================================================================
+// 🔑 Импорт книги квестов и провайдера
+// ============================================================================
+import { QuestBook } from './src/components/QuestBook';
+import { QuestProvider, useQuests } from './src/context/QuestContext';
 
 import useDraggable from './src/hooks/useDraggable';
 import { useZoom, ZoomProvider } from './src/hooks/useZoom';
@@ -132,11 +137,18 @@ const GameContent = () => {
     craftTiles,
     getAllTiles,
     // ============================================================================
-    // 🔑 НОВЫЕ МЕТОДЫ из контекста
+    // 🔑 МЕТОДЫ из контекста плиток
     // ============================================================================
     movePlacedTileToInventory,
     submitTile,
+    getTileCounts,
+    removeTilesForQuest,
   } = useTiles();
+  
+  // ============================================================================
+  // 🔑 МЕТОДЫ из контекста квестов
+  // ============================================================================
+  const { activeQuest, refreshQuest, submitQuest } = useQuests();
   
   const spawnerPos = useSpawner();
   const { offset } = useGrid();
@@ -152,14 +164,18 @@ const GameContent = () => {
   }>({ active: false });
   
   const [showRecipeBook, setShowRecipeBook] = useState(false);
+  // ============================================================================
+  // 🔑 Состояние для книги квестов
+  // ============================================================================
+  const [showQuestBook, setShowQuestBook] = useState(false);
 
   // ============================================================================
-  // 🔑 НОВОЕ: Выбранная плитка для показа модального окна
+  // 🔑 Выбранная плитка для показа модального окна действий
   // ============================================================================
   const [selectedPlacedTile, setSelectedPlacedTile] = useState<Tile | null>(null);
   
   // ============================================================================
-  // 🔑 НОВОЕ: Обработчик нажатия на размещённую плитку
+  // 🔑 Обработчик нажатия на размещённую плитку
   // ============================================================================
   const handlePlacedTilePress = useCallback((tile: Tile) => {
     if (__DEV__) console.log('[App] 🎯 Плитка выбрана:', tile.id);
@@ -178,6 +194,13 @@ const GameContent = () => {
       setIsInitialized(true);
     }
   }, [spawnerPos, createSpawnerTile, isInitialized]);
+
+  // ============================================================================
+  // 🔑 Инициализация квеста при старте
+  // ============================================================================
+  useEffect(() => {
+    refreshQuest();
+  }, [refreshQuest]);
 
   const spawnerTile = getSpawnerTile();
 
@@ -303,6 +326,19 @@ const GameContent = () => {
     draggableTile?.state !== 'PLACED' &&
     spawnerTile !== null;
 
+  // ============================================================================
+  // 🔑 Обработчик сдачи квеста
+  // ============================================================================
+  const handleQuestSubmit = useCallback(() => {
+    if (!activeQuest) return;
+    
+    const success = removeTilesForQuest(activeQuest.requirements);
+    if (success) {
+      submitQuest(getTileCounts());
+      if (__DEV__) console.log('[App] ✅ Квест сдан успешно');
+    }
+  }, [activeQuest, removeTilesForQuest, submitQuest, getTileCounts]);
+
   return (
     <View style={styles.gameContainer}>
       {/* ==================================================================== */}
@@ -334,11 +370,32 @@ const GameContent = () => {
       </TouchableOpacity>
 
       {/* ==================================================================== */}
+      {/* 🔑 КНОПКА ОТКРЫТИЯ КНИГИ КВЕСТОВ — справа над инвентарем */}
+      {/* ==================================================================== */}
+      <TouchableOpacity
+        style={styles.questBookButton}
+        onPress={() => setShowQuestBook(true)}
+        activeOpacity={0.7}
+      >
+        <Text style={styles.questBookButtonText}>📜 Квесты</Text>
+      </TouchableOpacity>
+
+      {/* ==================================================================== */}
       {/* 🔑 МОДАЛЬНОЕ ОКНО КНИГИ РЕЦЕПТОВ */}
       {/* ==================================================================== */}
       <RecipeBook
         visible={showRecipeBook}
         onClose={() => setShowRecipeBook(false)}
+      />
+
+      {/* ==================================================================== */}
+      {/* 🔑 МОДАЛЬНОЕ ОКНО КНИГИ КВЕСТОВ */}
+      {/* ==================================================================== */}
+      <QuestBook
+        visible={showQuestBook}
+        onClose={() => setShowQuestBook(false)}
+        tileCounts={getTileCounts()}
+        onSubmitQuest={handleQuestSubmit}
       />
 
       {/* Фидбек крафта */}
@@ -431,9 +488,11 @@ const App = () => {
       <ZoomProvider>
         <GridProvider>
           <TilesProvider>
-            <ZoomHandler>
-              <GameContent />
-            </ZoomHandler>
+            <QuestProvider>
+              <ZoomHandler>
+                <GameContent />
+              </ZoomHandler>
+            </QuestProvider>
           </TilesProvider>
         </GridProvider>
       </ZoomProvider>
@@ -499,7 +558,7 @@ const styles = StyleSheet.create({
     elevation: 10,
   },
   // ============================================================================
-  // 🔑 ИЗМЕНЕНО: Кнопка рецептов — угловая с скруглёнными краями
+  // 🔑 Кнопка рецептов — угловая с скруглёнными краями
   // ============================================================================
   recipeBookButton: {
     position: 'absolute',
@@ -518,6 +577,27 @@ const styles = StyleSheet.create({
   recipeBookButtonText: {
     color: '#fff',
     fontSize: 13,
+    fontWeight: '600',
+  },
+  // ============================================================================
+  // 🔑 НОВОЕ: Кнопка квестов — справа над инвентарем
+  // ============================================================================
+  questBookButton: {
+    position: 'absolute',
+    bottom: 110,  // Над инвентарем
+    right: 1,
+    backgroundColor: 'rgba(255, 152, 0, 0.9)',
+    paddingHorizontal: 26,
+    paddingVertical: 15,
+    borderRadius: 10,
+    zIndex: 99998,
+    elevation: 98,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.3)',
+  },
+  questBookButtonText: {
+    color: '#fff',
+    fontSize: 14,
     fontWeight: '600',
   },
 });

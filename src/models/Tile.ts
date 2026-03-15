@@ -39,7 +39,7 @@ export class Tile {
   // ============================================================================
   // КОНСТРУКТОР
   // ============================================================================
-  constructor(data: TileData & { rotation?: Rotation }) {
+  constructor(data: TileData & { rotation?: Rotation; activeSide?: Edge }) {
     this.id = data.id;
     this.textureKey = data.textureKey;
     
@@ -78,6 +78,18 @@ export class Tile {
   /**
    * Устанавливает активную сторону плитки
    * @param side - направление или undefined для удаления стрелки
+   * 
+   * 🔑 Теперь можно использовать:
+   * - tile.activeSide = 'top' (через сеттер)
+   * - tile.setActiveSide('top') (через метод)
+   */
+  public set activeSide(side: Edge | undefined) {
+    this._activeSide = side;
+  }
+  
+  /**
+   * Устанавливает активную сторону плитки (метод для совместимости)
+   * @param side - направление или undefined для удаления стрелки
    */
   public setActiveSide(side: Edge | undefined): void {
     this._activeSide = side;
@@ -111,7 +123,7 @@ export class Tile {
     const edges: Edge[] = ['top', 'right', 'bottom', 'left'];
     const baseIndex = edges.indexOf(this._activeSide);
     const steps = this._rotation / 90;
-    const finalIndex = (baseIndex + steps) % 4;
+    const finalIndex = (baseIndex + steps + 4) % 4; // +4 для обработки отрицательных значений
     const finalEdge = edges[finalIndex];
     
     // Определяем позицию и выравнивание для каждой стороны

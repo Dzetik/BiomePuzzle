@@ -24,7 +24,7 @@ export const TILE_DEFINITIONS: TileData[] = [
     activeSide: 'top',
     canSpawnInSpawner: false,
   },
-  /*{
+  {
     id: 'bread',
     textureKey: 'bread',
     baseEdges: {
@@ -34,6 +34,7 @@ export const TILE_DEFINITIONS: TileData[] = [
       left: '#4A7C23',
     },
     activeSide: 'top',
+    canSpawnInSpawner: false,
   },
   {
     id: 'butter',
@@ -78,7 +79,8 @@ export const TILE_DEFINITIONS: TileData[] = [
       left: '#4A7C23',
     },
     activeSide: 'top',
-  },*/
+    canSpawnInSpawner: false,
+  },
   {
     id: 'water',
     textureKey: 'water',

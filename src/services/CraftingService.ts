@@ -508,20 +508,19 @@ export class CraftingService {
     
     const removedIds: string[] = matchedTiles.map(mt => mt.tile.id);
     
-    // Создаём результирующую плитку
+    // Создаём результирующую плитку с activeSide сразу в конструкторе
     const resultTile = new Tile({
       id: generateTileId(),
       textureKey: recipe.result.textureKey,
       rotation: recipe.result.rotation ?? 0,
+      activeSide: recipe.result.activeSide,
     });
-    
-    if (recipe.result.activeSide) {
-      (resultTile as any).activeSide = recipe.result.activeSide;
-    }
     
     // ========================================================================
     // АТОМАРНОЕ ОБНОВЛЕНИЕ (если доступно)
     // ========================================================================
+    const usedCraftTiles = !!craftTiles;
+    
     if (craftTiles) {
       craftTiles(removedIds, {
         col: resultPosition.col,
@@ -604,38 +603,77 @@ export class CraftingService {
       return results;
     }
     
+    const getTileAtWithResult: (c: number, r: number) => PlacedTileInfo | undefined = (c, r) => {
+      if (c === col && r === row) {
+        return { tile: resultTile, col: c, row: r };
+      }
+      return getTileAt(c, r);
+    };
+    
+    if (typeof __DEV__ !== 'undefined' && __DEV__) {
+      console.log(`[Crafting] 🔗 checkChain глубина ${depth}:`, {
+        texture: resultTile.textureKey,
+        pos: `${col},${row}`,
+        activeSide: resultTile.activeSide,
+        rotation: resultTile.rotation,
+        candidateRecipes: candidateRecipes.map(r => r.id),
+      });
+    }
+    
     for (const recipe of candidateRecipes) {
-      const tileIndex = recipe.sequence.indexOf(resultTile.textureKey);
-      if (tileIndex === -1 || tileIndex === recipe.sequence.length - 1) continue;
-      
-      const match = this.validateChainFromPosition(
-        recipe,
-        tileIndex,
-        resultTile,
-        col,
-        row,
-        getTileAt
+      // 🔑 FIX: Проверяем ВСЕ позиции где текстура встречается в рецепте
+      // (а не только первую через indexOf)
+      const possiblePositions = this.findAllPositionsInSequence(
+        recipe.sequence,
+        resultTile.textureKey
       );
       
-      if (match) {
-        const craftResult = this.executeRecipe(match, tileOperations, callbacks);
-        results.push(craftResult);
+      for (const tileIndex of possiblePositions) {
+        // Пропускаем если текстура на последней позиции (не может быть ингредиентом)
+        if (tileIndex === recipe.sequence.length - 1) continue;
         
-        if (craftResult.success && craftResult.chainContinues && craftResult.createdTile) {
-          const chainResults = this.checkChain(
-            craftResult.createdTile.tile,
-            craftResult.createdTile.col,
-            craftResult.createdTile.row,
-            depth + 1,
-            visitedIds,
-            getTileAt,
-            tileOperations,
-            callbacks
-          );
-          results.push(...chainResults);
+        if (typeof __DEV__ !== 'undefined' && __DEV__) {
+          console.log(`[Crafting] 🔍 Проверка позиции ${tileIndex} в рецепте ${recipe.id}:`, {
+            sequence: recipe.sequence,
+            expectedNext: recipe.sequence[tileIndex + 1],
+          });
         }
         
-        break;
+        const match = this.validateChainFromPosition(
+          recipe,
+          tileIndex,
+          resultTile,
+          col,
+          row,
+          getTileAtWithResult  // ← 🔑 используем обёртку с resultTile
+        );
+        
+        if (match) {
+          if (typeof __DEV__ !== 'undefined' && __DEV__) {
+            console.log(`[Crafting] ✅ Цепочка найдена для ${recipe.id}:`, {
+              matchedTiles: match.matchedTiles.map(t => `${t.tile.textureKey}@${t.col},${t.row}`),
+            });
+          }
+          
+          const craftResult = this.executeRecipe(match, tileOperations, callbacks);
+          results.push(craftResult);
+          
+          if (craftResult.success && craftResult.chainContinues && craftResult.createdTile) {
+            const chainResults = this.checkChain(
+              craftResult.createdTile.tile,
+              craftResult.createdTile.col,
+              craftResult.createdTile.row,
+              depth + 1,
+              visitedIds,
+              getTileAt, // для следующих уровней используем оригинальный getTileAt
+              tileOperations,
+              callbacks
+            );
+            results.push(...chainResults);
+          }
+          
+          break; // рецепт найден, переходим к следующему
+        }
       }
     }
     
@@ -678,7 +716,7 @@ export class CraftingService {
     callbacks?: CraftingCallbacks
   ): { crafted: boolean; results: CraftResult[] } {
     const results: CraftResult[] = [];
-    const checkedRecipes = new Set<string>(); // Чтобы не проверять один рецепт дважды
+    const checkedRecipes = new Set<string>();
     
     // ------------------------------------------------------------------------
     // 1️⃣ Проверяем цепочки где размещённая плитка — часть рецепта
@@ -689,8 +727,25 @@ export class CraftingService {
       const firstResult = this.executeRecipe(primaryMatch, tileOperations, callbacks);
       results.push(firstResult);
       
+      // 🔑 FIX: Вызываем checkChain только если chainContinues=true И есть createdTile
       if (firstResult.chainContinues && firstResult.createdTile) {
-        const visitedIds = new Set<string>([...firstResult.removedTileIds, firstResult.createdTile.tile.id]);
+        if (typeof __DEV__ !== 'undefined' && __DEV__) {
+          console.log(`[Crafting] 🔗 Запускаем checkChain для созданной плитки:`, {
+            texture: firstResult.createdTile.tile.textureKey,
+            pos: `${firstResult.createdTile.col},${firstResult.createdTile.row}`,
+            activeSide: firstResult.createdTile.tile.activeSide,
+          });
+        }
+        
+        const visitedIds = new Set<string>(firstResult.removedTileIds);
+        
+        // 🔑 FIX: Создаём обёртку getTileAt, которая гарантированно вернёт созданную плитку
+        const getTileAtWithResult: (c: number, r: number) => PlacedTileInfo | undefined = (c, r) => {
+          if (c === firstResult.createdTile!.col && r === firstResult.createdTile!.row) {
+            return { tile: firstResult.createdTile!.tile, col: c, row: r };
+          }
+          return getTileAt(c, r);
+        };
         
         const chainResults = this.checkChain(
           firstResult.createdTile.tile,
@@ -698,7 +753,7 @@ export class CraftingService {
           firstResult.createdTile.row,
           1,
           visitedIds,
-          getTileAt,
+          getTileAtWithResult,  // ← 🔑 используем обёртку!
           tileOperations,
           callbacks
         );
@@ -707,8 +762,7 @@ export class CraftingService {
     }
     
     // ------------------------------------------------------------------------
-    // 2️⃣ 🔥 Проверяем соседей: если их activeSide указывает на размещённую плитку,
-    //    возможно, они "ждали" именно эту плитку для завершения цепочки
+    // 2️⃣ Проверяем соседей: если их activeSide указывает на размещённую плитку
     // ------------------------------------------------------------------------
     const neighbors = getNeighborPositions(col, row);
     for (const neighbor of neighbors) {
@@ -717,15 +771,12 @@ export class CraftingService {
       
       const neighborTile = neighborInfo.tile;
       
-      // 🔑 Проверяем: указывает ли activeSide соседа (с учётом rotation!) НА размещённую плитку
       if (!doesActiveSidePointTo(neighborTile, neighbor.col, neighbor.row, col, row)) {
         continue;
       }
       
-      // Если сосед "смотрит" на новую плитку — проверяем цепочки от этого соседа
       const neighborMatch = this.findMatchingRecipe(neighborTile, neighbor.col, neighbor.row, getTileAt);
       
-      // Пропускаем если рецепт уже обработан в шаге 1
       if (!neighborMatch || checkedRecipes.has(neighborMatch.recipe.id)) {
         continue;
       }
@@ -733,14 +784,28 @@ export class CraftingService {
       checkedRecipes.add(neighborMatch.recipe.id);
       
       if (typeof __DEV__ !== 'undefined' && __DEV__) {
-        console.log(`[Crafting] 🎯 Сосед ${neighborTile.textureKey}@${neighbor.col},${neighbor.row} указывает на новую плитку — проверяем цепочку`);
+        console.log(`[Crafting] 🎯 Сосед ${neighborTile.textureKey}@${neighbor.col},${neighbor.row} указывает на новую плитку`);
       }
       
       const craftResult = this.executeRecipe(neighborMatch, tileOperations, callbacks);
       results.push(craftResult);
       
       if (craftResult.chainContinues && craftResult.createdTile) {
+        if (typeof __DEV__ !== 'undefined' && __DEV__) {
+          console.log(`[Crafting] 🔗 Запускаем checkChain для созданной плитки (от соседа):`, {
+            texture: craftResult.createdTile.tile.textureKey,
+            pos: `${craftResult.createdTile.col},${craftResult.createdTile.row}`,
+          });
+        }
+        
         const visitedIds = new Set<string>([...craftResult.removedTileIds, craftResult.createdTile.tile.id]);
+        
+        const getTileAtWithResult: (c: number, r: number) => PlacedTileInfo | undefined = (c, r) => {
+          if (c === craftResult.createdTile!.col && r === craftResult.createdTile!.row) {
+            return { tile: craftResult.createdTile!.tile, col: c, row: r };
+          }
+          return getTileAt(c, r);
+        };
         
         const chainResults = this.checkChain(
           craftResult.createdTile.tile,
@@ -748,7 +813,7 @@ export class CraftingService {
           craftResult.createdTile.row,
           1,
           visitedIds,
-          getTileAt,
+          getTileAtWithResult,  // ← 🔑 используем обёртку!
           tileOperations,
           callbacks
         );

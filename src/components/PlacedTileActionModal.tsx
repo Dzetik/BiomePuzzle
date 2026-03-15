@@ -128,7 +128,7 @@ export const PlacedTileActionModal: React.FC<PlacedTileActionModalProps> = ({
             </TouchableOpacity>
 
             {/* ✅ Сдать */}
-            <TouchableOpacity
+            {/*<TouchableOpacity
               style={[styles.actionButton, styles.submitButton]}
               onPress={() => handleAction('submit')}
               activeOpacity={0.7}
@@ -137,7 +137,7 @@ export const PlacedTileActionModal: React.FC<PlacedTileActionModalProps> = ({
               <Text style={styles.actionButtonSubtext}>
                 Завершить задачу (ресурсы позже)
               </Text>
-            </TouchableOpacity>
+            </TouchableOpacity>*/}
 
           </View>
 

@@ -57,10 +57,16 @@ export interface TilesContextType {
   setActiveInventoryTileId: (id: string | null) => void;
   
   // ============================================================================
-  // 🔑 НОВОЕ: Действия с размещёнными плитками
+  // 🔑 Действия с размещёнными плитками
   // ============================================================================
   movePlacedTileToInventory: (tileId: string) => boolean;
   submitTile: (tileId: string) => void;
+  
+  // ============================================================================
+  // 🔑 НОВОЕ: Для системы квестов
+  // ============================================================================
+  getTileCounts: () => Record<string, number>;
+  removeTilesForQuest: (requirements: Array<{ textureKey: string; required: number }>) => boolean;
 }
 
 // ============================================================================
@@ -256,7 +262,7 @@ export const TilesProvider: React.FC<TilesProviderProps> = ({ children }) => {
   }, [spawnerTile, inventoryTiles.length]);
   
   // ============================================================================
-  // 🔑 НОВОЕ: Перемещение размещённой плитки в инвентарь
+  // 🔑 Перемещение размещённой плитки в инвентарь
   // ============================================================================
   const movePlacedTileToInventory = useCallback((tileId: string): boolean => {
     const entry = placedTilesRef.current.get(tileId);
@@ -291,7 +297,7 @@ export const TilesProvider: React.FC<TilesProviderProps> = ({ children }) => {
   }, [inventoryTiles.length]);
 
   // ============================================================================
-  // 🔑 НОВОЕ: «Сдать» плитку (заглушка под экономику)
+  // 🔑 «Сдать» плитку (заглушка под экономику)
   // ============================================================================
   const submitTile = useCallback((tileId: string) => {
     const entry = placedTilesRef.current.get(tileId);
@@ -319,6 +325,90 @@ export const TilesProvider: React.FC<TilesProviderProps> = ({ children }) => {
       return newMap;
     });
   }, []);
+  
+  // ============================================================================
+  // 🔑 НОВОЕ: Подсчёт плиток по типам (для квестов)
+  // ============================================================================
+  const getTileCounts = useCallback((): Record<string, number> => {
+    const counts: Record<string, number> = {};
+    
+    // Считаем размещённые плитки
+    for (const [, info] of placedTilesRef.current) {
+      const key = info.tile.textureKey;
+      counts[key] = (counts[key] || 0) + 1;
+    }
+    
+    // Считаем плитки в инвентаре
+    for (const tile of inventoryTiles) {
+      const key = tile.textureKey;
+      counts[key] = (counts[key] || 0) + 1;
+    }
+    
+    return counts;
+  }, [inventoryTiles]);
+
+  // ============================================================================
+  // 🔑 НОВОЕ: Удаление плиток для квеста (сначала с поля, потом из инвентаря)
+  // ============================================================================
+  const removeTilesForQuest = useCallback((
+    requirements: Array<{ textureKey: string; required: number }>
+  ): boolean => {
+    const counts = getTileCounts();
+    
+    // Проверяем, достаточно ли плиток
+    for (const req of requirements) {
+      if ((counts[req.textureKey] || 0) < req.required) {
+        return false;
+      }
+    }
+    
+    // Удаляем плитки для каждого требования
+    for (const req of requirements) {
+      let remaining = req.required;
+      
+      // 1. Сначала удаляем с поля
+      const tilesToRemove: string[] = [];
+      for (const [tileId, info] of placedTilesRef.current) {
+        if (remaining <= 0) break;
+        if (info.tile.textureKey === req.textureKey) {
+          tilesToRemove.push(tileId);
+          remaining--;
+        }
+      }
+      
+      // Удаляем найденные плитки с грида
+      if (tilesToRemove.length > 0) {
+        setPlacedTiles(prev => {
+          const newMap = new Map(prev);
+          for (const tileId of tilesToRemove) {
+            const entry = newMap.get(tileId);
+            if (entry) {
+              GridService.releaseCell(entry.col, entry.row);
+              newMap.delete(tileId);
+            }
+          }
+          placedTilesRef.current = newMap;
+          return newMap;
+        });
+      }
+      
+      // 2. Если нужно, удаляем из инвентаря
+      if (remaining > 0) {
+        setInventoryTiles(prev => {
+          let removed = 0;
+          return prev.filter(tile => {
+            if (tile.textureKey === req.textureKey && removed < remaining) {
+              removed++;
+              return false;
+            }
+            return true;
+          });
+        });
+      }
+    }
+    
+    return true;
+  }, [getTileCounts]);
   
   // --------------------------------------------------------------------------
   // ЗНАЧЕНИЕ КОНТЕКСТА
@@ -355,10 +445,16 @@ export const TilesProvider: React.FC<TilesProviderProps> = ({ children }) => {
     setActiveInventoryTileId,
     
     // ============================================================================
-    // 🔑 НОВЫЕ МЕТОДЫ
+    // 🔑 МЕТОДЫ ДЛЯ ДЕЙСТВИЙ С ПЛИТКАМИ
     // ============================================================================
     movePlacedTileToInventory,
     submitTile,
+    
+    // ============================================================================
+    // 🔑 НОВЫЕ МЕТОДЫ ДЛЯ КВЕСТОВ
+    // ============================================================================
+    getTileCounts,
+    removeTilesForQuest,
   };
   
   return (

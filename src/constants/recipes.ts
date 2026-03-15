@@ -65,7 +65,7 @@ export const RECIPES: Recipe[] = [
   // --------------------------------------------------------------------------
   {
     id: 'bread_recipe',
-    sequence: ['water', 'millet', 'fire'],  // Порядок ВАЖЕН!
+    sequence: ['water', 'millet', 'fire'],  
     result: {
       textureKey: 'bread',
       activeSide: 'top',  // У хлеба стрелка смотрит вверх (для цепочек)
@@ -78,32 +78,9 @@ export const RECIPES: Recipe[] = [
     },
     chaining: {
       enabled: true,  // Хлеб может участвовать в дальнейших крафтах
-      delayBetweenSteps: 150,  // 150мс между шагами цепочки
     },
     priority: 10,
   },
-  
-  // --------------------------------------------------------------------------
-  // Рецепт: КАША (вода + пшено, порядок не важен для 2 ингредиентов)
-  // --------------------------------------------------------------------------
-  /*{
-    id: 'porridge_recipe',
-    sequence: ['water', 'millet'],
-    result: {
-      textureKey: 'porridge',
-      activeSide: 'right',
-      rotation: 0,
-    },
-    execution: {
-      resultPosition: 'last',
-      consumeAll: true,
-      animationDuration: 300,
-    },
-    chaining: {
-      enabled: false,  // Каша — финальный продукт
-    },
-    priority: 5,
-  },*/
   
   // --------------------------------------------------------------------------
   // Рецепт: ТОСТ (хлеб ↑ + масло)
@@ -113,7 +90,7 @@ export const RECIPES: Recipe[] = [
     sequence: ['bread', 'butter'],
     result: {
       textureKey: 'toast',
-      activeSide: 'right',
+      activeSide: 'top',
       rotation: 0,
     },
     execution: {
@@ -131,7 +108,7 @@ export const RECIPES: Recipe[] = [
   // --------------------------------------------------------------------------
   // Рецепт: СЭНДВИЧ (тост → + сыр)
   // --------------------------------------------------------------------------
-  {
+  /*{
     id: 'sandwich_recipe',
     sequence: ['toast', 'cheese'],
     result: {
@@ -147,11 +124,10 @@ export const RECIPES: Recipe[] = [
       enabled: false,  // Сэндвич — финальный продукт
     },
     priority: 10,
-  },
+  },*/
   
   // --------------------------------------------------------------------------
   // Рецепт: СОК (фрукт + фрукт + вода = любой порядок для 2 фруктов)
-  // Демонстрация рецепта с повторяющимися ингредиентами
   // --------------------------------------------------------------------------
   {
     id: 'juice_recipe',
