@@ -66,7 +66,7 @@ const RecipeIngredients: React.FC<{ sequence: string[] }> = ({ sequence }) => {
             <RecipeTile textureKey={textureKey} />
           </View>
           {index < sequence.length - 1 && (
-            <Text style={styles.plusSign}>+</Text>
+            <Text style={styles.plusSign}>→</Text>
           )}
         </React.Fragment>
       ))}

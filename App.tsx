@@ -18,6 +18,10 @@ import GridView from './src/components/GridView';
 import SpawnerCellView from './src/components/SpawnerCellView';
 import InventoryStrip from './src/components/InventoryStrip';
 import RecipeBook from './src/components/RecipeBook';
+// ============================================================================
+// 🔑 НОВОЕ: Импорт модального окна действий
+// ============================================================================
+import { PlacedTileActionModal } from './src/components/PlacedTileActionModal';
 
 import useDraggable from './src/hooks/useDraggable';
 import { useZoom, ZoomProvider } from './src/hooks/useZoom';
@@ -67,9 +71,13 @@ const ZoomHandler = ({ children }) => {
 };
 
 // ========================================
-// PlacedTiles — с поддержкой activeSide
+// PlacedTiles — с поддержкой onPress для размещённых плиток
 // ========================================
-const PlacedTiles = () => {
+interface PlacedTilesProps {
+  onPlacedTilePress?: (tile: Tile) => void;
+}
+
+const PlacedTiles: React.FC<PlacedTilesProps> = ({ onPlacedTilePress }) => {
   const { getAllTiles } = useTiles();
   const { scale } = useZoom();
   const { offset } = useGrid();
@@ -98,6 +106,9 @@ const PlacedTiles = () => {
             rotation={tile.rotation}
             tile={tile}
             debugLabel={`Placed[${entry.col},${entry.row}]`}
+            // 🔑 Пропсы для обработки нажатия на размещённую плитку
+            isPlaced={true}
+            onPlacedTilePress={onPlacedTilePress}
           />
         );
       })}
@@ -119,6 +130,12 @@ const GameContent = () => {
     removeTile,
     getTileAt,
     craftTiles,
+    getAllTiles,
+    // ============================================================================
+    // 🔑 НОВЫЕ МЕТОДЫ из контекста
+    // ============================================================================
+    movePlacedTileToInventory,
+    submitTile,
   } = useTiles();
   
   const spawnerPos = useSpawner();
@@ -135,6 +152,19 @@ const GameContent = () => {
   }>({ active: false });
   
   const [showRecipeBook, setShowRecipeBook] = useState(false);
+
+  // ============================================================================
+  // 🔑 НОВОЕ: Выбранная плитка для показа модального окна
+  // ============================================================================
+  const [selectedPlacedTile, setSelectedPlacedTile] = useState<Tile | null>(null);
+  
+  // ============================================================================
+  // 🔑 НОВОЕ: Обработчик нажатия на размещённую плитку
+  // ============================================================================
+  const handlePlacedTilePress = useCallback((tile: Tile) => {
+    if (__DEV__) console.log('[App] 🎯 Плитка выбрана:', tile.id);
+    setSelectedPlacedTile(tile);
+  }, []);
 
   // Инициализация спавнера
   useEffect(() => {
@@ -288,7 +318,8 @@ const GameContent = () => {
 
       <GridView />
       <SpawnerCellView />
-      <PlacedTiles />
+      {/* 🔑 ПЕРЕДАЁМ onPlacedTilePress как проп */}
+      <PlacedTiles onPlacedTilePress={handlePlacedTilePress} />
       <InventoryStrip />
 
       {/* ==================================================================== */}
@@ -350,6 +381,43 @@ const GameContent = () => {
           debugLabel="InventoryFloating"
         />
       )}
+
+      {/* ==================================================================== */}
+      {/* 🔑 МОДАЛЬНОЕ ОКНО ДЕЙСТВИЙ ДЛЯ РАЗМЕЩЁННОЙ ПЛИТКИ */}
+      {/* ==================================================================== */}
+      <PlacedTileActionModal
+        visible={!!selectedPlacedTile}
+        tile={selectedPlacedTile}
+        onClose={() => setSelectedPlacedTile(null)}
+        
+        onDelete={(tileId) => {
+          // ✅ Проверяем, что плитка ещё на гриде перед удалением
+          const placed = getAllTiles().find(t => t.tile.id === tileId);
+          if (placed) {
+            removeTile(tileId);
+            setSelectedPlacedTile(null);
+            if (__DEV__) console.log('[App] 🗑️ Удалено:', tileId);
+          }
+        }}
+        
+        onToInventory={(tileId) => {
+          const success = movePlacedTileToInventory(tileId);
+          if (success) {
+            setSelectedPlacedTile(null);
+            if (__DEV__) console.log('[App] 📦 В инвентарь:', tileId);
+          } else {
+            // ❌ Инвентарь полон — не закрываем окно
+            if (__DEV__) console.warn('[App] ❌ Инвентарь полон');
+            // TODO: показать UI-уведомление пользователю
+          }
+        }}
+        
+        onSubmit={(tileId) => {
+          submitTile(tileId);
+          setSelectedPlacedTile(null);
+          if (__DEV__) console.log('[App] ✅ Сдано:', tileId);
+        }}
+      />
     </View>
   );
 };
@@ -437,7 +505,7 @@ const styles = StyleSheet.create({
     position: 'absolute',
     // 🔑 Позиция: над спавнером (справа вверху)
     top: STATUS_BAR_HEIGHT + 4,
-    right: 19,  // Было: left: 10 → Стало: right: 15 ✅
+    right: 19,
     backgroundColor: 'rgba(100, 100, 150, 0.9)',
     paddingHorizontal: 12,
     paddingVertical: 8,

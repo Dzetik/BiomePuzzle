@@ -55,6 +55,12 @@ export interface TilesContextType {
   // Активная плитка
   activeInventoryTileId: string | null;
   setActiveInventoryTileId: (id: string | null) => void;
+  
+  // ============================================================================
+  // 🔑 НОВОЕ: Действия с размещёнными плитками
+  // ============================================================================
+  movePlacedTileToInventory: (tileId: string) => boolean;
+  submitTile: (tileId: string) => void;
 }
 
 // ============================================================================
@@ -249,6 +255,71 @@ export const TilesProvider: React.FC<TilesProviderProps> = ({ children }) => {
     return true;
   }, [spawnerTile, inventoryTiles.length]);
   
+  // ============================================================================
+  // 🔑 НОВОЕ: Перемещение размещённой плитки в инвентарь
+  // ============================================================================
+  const movePlacedTileToInventory = useCallback((tileId: string): boolean => {
+    const entry = placedTilesRef.current.get(tileId);
+    if (!entry) {
+      console.warn('[TilesContext] ❌ Плитка не найдена на гриде:', tileId);
+      return false;
+    }
+    if (inventoryTiles.length >= INVENTORY_MAX_SLOTS) {
+      console.warn('[TilesContext] ❌ Инвентарь полон');
+      return false;
+    }
+    
+    // 🔹 Перемещаем сам объект плитки (не копию!) — избегаем дублирования ID
+    const tile = entry.tile;
+    
+    // 1. Добавляем в инвентарь
+    setInventoryTiles(prev => [tile, ...prev]);
+    
+    // 2. Удаляем с грида и освобождаем ячейку
+    setPlacedTiles(prev => {
+      const newMap = new Map(prev);
+      newMap.delete(tileId);
+      placedTilesRef.current = newMap;
+      GridService.releaseCell(entry.col, entry.row);
+      return newMap;
+    });
+    
+    if (__DEV__) {
+      console.log('[TilesContext] ✅ Плитка перемещена в инвентарь:', tileId);
+    }
+    return true;
+  }, [inventoryTiles.length]);
+
+  // ============================================================================
+  // 🔑 НОВОЕ: «Сдать» плитку (заглушка под экономику)
+  // ============================================================================
+  const submitTile = useCallback((tileId: string) => {
+    const entry = placedTilesRef.current.get(tileId);
+    if (!entry) {
+      console.warn('[TilesContext] ❌ Плитка не найдена для сдачи:', tileId);
+      return;
+    }
+    
+    // 🔹 Здесь будет логика начисления ресурсов
+    // Пример: addResources(getTileReward(entry.tile.textureKey));
+    
+    if (__DEV__) {
+      console.log('[TilesContext] 🎯 Плитка сдана:', {
+        tileId,
+        textureKey: entry.tile.textureKey,
+      });
+    }
+    
+    // Удаляем плитку с грида
+    setPlacedTiles(prev => {
+      const newMap = new Map(prev);
+      newMap.delete(tileId);
+      placedTilesRef.current = newMap;
+      GridService.releaseCell(entry.col, entry.row);
+      return newMap;
+    });
+  }, []);
+  
   // --------------------------------------------------------------------------
   // ЗНАЧЕНИЕ КОНТЕКСТА
   // --------------------------------------------------------------------------
@@ -282,6 +353,12 @@ export const TilesProvider: React.FC<TilesProviderProps> = ({ children }) => {
     
     activeInventoryTileId,
     setActiveInventoryTileId,
+    
+    // ============================================================================
+    // 🔑 НОВЫЕ МЕТОДЫ
+    // ============================================================================
+    movePlacedTileToInventory,
+    submitTile,
   };
   
   return (

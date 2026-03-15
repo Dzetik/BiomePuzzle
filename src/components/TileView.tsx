@@ -1,6 +1,6 @@
 // src/components/TileView.tsx
 import React from 'react';
-import { Animated, Image, View, Text, StyleSheet } from 'react-native';
+import { Animated, Image, View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { StyleProp, ViewStyle } from 'react-native'; 
 import { useGrid } from '../context/GridContext';
 import { useZoom } from '../hooks/useZoom';
@@ -29,6 +29,14 @@ interface TileViewProps {
   
   /** Явно показать/скрыть стрелку (по умолчанию: показывать если activeSide задан) */
   showArrow?: boolean;
+  
+  // ============================================================================
+  // 🔑 НОВОЕ: Обработчик нажатия для размещённых плиток
+  // ============================================================================
+  /** Флаг: плитка размещена и статична (не перетаскивается) */
+  isPlaced?: boolean;
+  /** Колбэк нажатия на размещённую плитку */
+  onPlacedTilePress?: (tile: Tile) => void;
 }
 
 const TileView: React.FC<TileViewProps> = ({ 
@@ -44,6 +52,8 @@ const TileView: React.FC<TileViewProps> = ({
   activeSide,
   tile,
   showArrow,
+  isPlaced = false,
+  onPlacedTilePress,
 }) => {
   const { offset } = useGrid();
   const { scale } = useZoom();
@@ -60,34 +70,29 @@ const TileView: React.FC<TileViewProps> = ({
   const arrowConfig = React.useMemo(() => {
     if (!shouldShowArrow || !resolvedActiveSide) return null;
     
-    const arrowSize = 16;      // Размер основания треугольника
-    const arrowOffset = 4;     // Отступ стрелки от края плитки (внутрь)
+    const arrowSize = 16;
+    const arrowOffset = 4;
     
-    // Позиция в локальных координатах (до применения rotation)
     let x = 0, y = 0;
     let direction: 'up' | 'right' | 'down' | 'left' = 'up';
     
     switch (resolvedActiveSide) {
       case 'top':
-        // Стрелка по центру сверху, смотрит вверх
         x = (width - arrowSize) / 2;
-        y = arrowOffset;  // Чуть внутри от верхнего края
+        y = arrowOffset;
         direction = 'up';
         break;
       case 'right':
-        // Стрелка по центру справа, смотрит вправо
         x = width - arrowSize - arrowOffset;
-        y = (height - arrowSize * 0.9) / 2;  // 0.9 = высота треугольника
+        y = (height - arrowSize * 0.9) / 2;
         direction = 'right';
         break;
       case 'bottom':
-        // Стрелка по центру снизу, смотрит вниз
         x = (width - arrowSize) / 2;
         y = height - arrowSize * 0.9 - arrowOffset;
         direction = 'down';
         break;
       case 'left':
-        // Стрелка по центру слева, смотрит влево
         x = arrowOffset;
         y = (height - arrowSize * 0.9) / 2;
         direction = 'left';
@@ -97,21 +102,6 @@ const TileView: React.FC<TileViewProps> = ({
     return { position: { x, y }, direction, size: arrowSize };
   }, [shouldShowArrow, resolvedActiveSide, width, height]);
   
-  // ============================================================================
-  // 🔍 ОТЛАДКА: Лог рендера
-  // ============================================================================
-  /*React.useEffect(() => {
-    if (__DEV__) {
-      console.log(`[TileView] 🎬 ${debugLabel || tileId}:`, {
-        position: { x: Math.round(position?.x || 0), y: Math.round(position?.y || 0) },
-        size: { width, height },
-        rotation,
-        activeSide: resolvedActiveSide,
-        showingArrow: shouldShowArrow && !!arrowConfig,
-      });
-    }
-  }, [tileId, debugLabel, position?.x, position?.y, width, height, rotation, resolvedActiveSide, shouldShowArrow, arrowConfig]);*/
-
   // ============================================================================
   // СТИЛИ КОНТЕЙНЕРА ПЛИТКИ
   // ============================================================================
@@ -126,8 +116,6 @@ const TileView: React.FC<TileViewProps> = ({
     width: typeof width === 'number' ? width : 50,
     height: typeof height === 'number' ? height : 50,
     
-    // 🔑 ВРАЩЕНИЕ ПРИМЕНЯЕТСЯ КО ВСЕМУ КОНТЕЙНЕРУ
-    // Всё внутри (изображение, стрелка, дебаг) повернётся вместе
     transform: [{ rotate: `${rotation}deg` }],
     
     ...(isInInventory && {
@@ -142,58 +130,78 @@ const TileView: React.FC<TileViewProps> = ({
   // РЕНДЕР
   // ============================================================================
   return (
-    <Animated.View style={[styles.tile, tileStyle]} {...(gesture ? { ...gesture.panHandlers } : {})}>
-      
-      {/* 🔹 Изображение текстуры плитки */}
-      <Image 
-        source={textureSource} 
-        style={styles.image} 
-        resizeMode="cover"
-        onLoad={() => __DEV__ && console.log(`[TileView] ✅ Image loaded: ${tileId}`)}
-        onError={(e) => __DEV__ && console.error(`[TileView] ❌ Image error: ${tileId}`, e.nativeEvent?.error)}
-      />
+    <>
+      {/* 🔹 Основной контент плитки (как в оригинале) */}
+      <Animated.View style={[styles.tile, tileStyle]} {...(gesture ? { ...gesture.panHandlers } : {})}>
+        
+        {/* Изображение текстуры */}
+        <Image 
+          source={textureSource} 
+          style={styles.image} 
+          resizeMode="cover"
+          onLoad={() => __DEV__ && console.log(`[TileView] ✅ Image loaded: ${tileId}`)}
+          onError={(e) => __DEV__ && console.error(`[TileView] ❌ Image error: ${tileId}`, e.nativeEvent?.error)}
+        />
+        
+        {/* Стрелка активной стороны */}
+        {shouldShowArrow && arrowConfig && (
+          <View 
+            style={{
+              position: 'absolute',
+              left: arrowConfig.position.x,
+              top: arrowConfig.position.y,
+              zIndex: 15,
+            }}
+            pointerEvents="none"
+          >
+            <ActiveSideArrow 
+              direction={arrowConfig.direction}
+              size={arrowConfig.size}
+              color="#ffffff"
+            />
+          </View>
+        )}
+        
+      </Animated.View>
       
       {/* ======================================================================== */}
-      {/* 🔹 СТРЕЛКА АКТИВНОЙ СТОРОНЫ — отдельный слой, НЕ в debug overlay */}
+      {/* 🔹 ПРОЗРАЧНЫЙ ОВЕРЛЕЙ ДЛЯ ТАПОВ (только для размещённых плиток)          */}
       {/* ======================================================================== */}
-      {shouldShowArrow && arrowConfig && (
-        <View 
+      {isPlaced && !gesture && onPlacedTilePress && tile && (
+        <TouchableOpacity
+          activeOpacity={0.7}
+          onPress={() => onPlacedTilePress(tile)}
           style={{
             position: 'absolute',
-            left: arrowConfig.position.x,
-            top: arrowConfig.position.y,
-            // Не добавляем transform здесь — вращение уже на родительском контейнере!
-            zIndex: 15,
+            left: typeof position?.x === 'number' ? position.x : 0,
+            top: typeof position?.y === 'number' ? position.y : 0,
+            width: typeof width === 'number' ? width : 50,
+            height: typeof height === 'number' ? height : 50,
+            // zIndex на 1 выше, чтобы перехватывать тапы поверх плитки
+            zIndex: (typeof tileStyle.zIndex === 'number' ? tileStyle.zIndex : 0) + 1,
+            borderRadius: 8, // Совпадает с borderRadius плитки
           }}
-          pointerEvents="none"
-        >
-          <ActiveSideArrow 
-            direction={arrowConfig.direction}
-            size={arrowConfig.size}
-            color="#ffffff"
-          />
-        </View>
+        />
       )}
       
-      {/* ======================================================================== */}
-      {/* 🔹 ДЕБАГ ОВЕРЛЕЙ — отдельный слой, под стрелкой */}
-      {/* ======================================================================== */}
-      {/*<View style={styles.debugOverlay}>
-        <Text style={styles.debugText}>{tileId}</Text>
-        <Text style={styles.debugTextSmall}>
-          {Math.round(position?.x || 0)},{Math.round(position?.y || 0)}
-        </Text>
-        <Text style={styles.debugTextSmall}>🔄 {rotation}°</Text>
-        
-        {/* 🔑 Показываем ИСХОДНОЕ направление (до поворота) для отладки */}
-        {/*{resolvedActiveSide && (
-          <Text style={[styles.debugTextSmall, { color: '#0f0', marginTop: 2 }]}>
-            ➤ {resolvedActiveSide} (local)
-          </Text>
-        )}
-      </View>*/}
-      
-    </Animated.View>
+      {/* Визуальный фидбек при нажатии (опционально) */}
+      {isPlaced && !gesture && onPlacedTilePress && tile && (
+        <View 
+          style={[
+            styles.placedHighlight,
+            {
+              position: 'absolute',
+              left: typeof position?.x === 'number' ? position.x : 0,
+              top: typeof position?.y === 'number' ? position.y : 0,
+              width: typeof width === 'number' ? width : 50,
+              height: typeof height === 'number' ? height : 50,
+              zIndex: (typeof tileStyle.zIndex === 'number' ? tileStyle.zIndex : 0) + 2,
+            }
+          ]} 
+          pointerEvents="none" 
+        />
+      )}
+    </>
   );
 };
 
@@ -212,7 +220,6 @@ const styles = StyleSheet.create({
   image: { 
     width: '100%', 
     height: '100%',
-    // Убедимся что изображение не перекрывает стрелку
     zIndex: 1,
   },
   debugOverlay: {
@@ -222,7 +229,7 @@ const styles = StyleSheet.create({
     right: 0,
     backgroundColor: 'rgba(0,0,0,0.7)', 
     padding: 4,
-    zIndex: 10,  // Под стрелкой (15), но поверх изображения (1)
+    zIndex: 10,
   },
   debugText: { 
     color: 'yellow', 
@@ -234,6 +241,14 @@ const styles = StyleSheet.create({
     color: 'white', 
     fontSize: 8, 
     textAlign: 'center' 
+  },
+  // ============================================================================
+  // 🔑 Подсветка при нажатии на размещённую плитку
+  // ============================================================================
+  placedHighlight: {
+    backgroundColor: 'rgba(255, 255, 255, 0.15)',
+    borderRadius: 8,
+    opacity: 0,
   },
 });
 
