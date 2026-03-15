@@ -26,6 +26,8 @@ export interface CraftingConfig {
   
   /** Показывать ли отладочную визуализацию проверенных цепочек */
   debugVisualize: boolean;
+
+  maxChainDepth: number;
 }
 
 export const CRAFTING_CONFIG: CraftingConfig = {
@@ -36,6 +38,7 @@ export const CRAFTING_CONFIG: CraftingConfig = {
   chainDelayMs: 150,
   debugMode: __DEV__ ?? false,
   debugVisualize: __DEV__ ?? false,
+  maxChainDepth: 10,
 };
 
 export default CRAFTING_CONFIG;

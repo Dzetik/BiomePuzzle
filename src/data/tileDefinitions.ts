@@ -22,6 +22,7 @@ export const TILE_DEFINITIONS: TileData[] = [
       left: '#4A7C23',
     },
     activeSide: 'top',
+    canSpawnInSpawner: false,
   },
   /*{
     id: 'bread',
@@ -145,8 +146,21 @@ export const TILE_DEFINITIONS: TileData[] = [
 
 /**
  * Выбирает случайное определение плитки из пула
+ * @param craftingOnly — если true, выбирать только из ингредиентов крафта
  */
-export function getRandomTileDefinition(): TileData {
-  const randomIndex = Math.floor(Math.random() * TILE_DEFINITIONS.length);
-  return TILE_DEFINITIONS[randomIndex];
+export function getRandomTileDefinition(craftingOnly: boolean = false): TileData {
+  // 🔑 Фильтруем: canSpawnInSpawner !== false (undefined = true по умолчанию)
+  const spawnableTiles = TILE_DEFINITIONS.filter(
+    t => t.canSpawnInSpawner !== false
+  );
+  
+  if (spawnableTiles.length === 0) {
+    console.warn('[tileDefinitions] ⚠️ Нет плиток с canSpawnInSpawner=true!');
+    return TILE_DEFINITIONS[0];
+  }
+  
+  const randomIndex = Math.floor(Math.random() * spawnableTiles.length);
+  return spawnableTiles[randomIndex];
 }
+
+export default TILE_DEFINITIONS;

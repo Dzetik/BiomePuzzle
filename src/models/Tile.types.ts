@@ -16,4 +16,5 @@ export interface TileData {
   textureKey: string; // Ключ текстуры для маппинга в UI слое
   baseEdges?: EdgeColors; // Цвета рёбер в состоянии поворота 0
   activeSide?: Edge;
+  canSpawnInSpawner?: boolean;
 }
