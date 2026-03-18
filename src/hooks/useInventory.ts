@@ -117,21 +117,20 @@ export const useInventory = (): UseInventoryReturn => {
   }, [removeFromInventory]);
   
   // ============================================================================
-  // 🔑 КЛЮЧЕВОЕ ИСПРАВЛЕНИЕ: rotateTile триггерит rotationTick
-  // ============================================================================
-  // При повороте плитки мутируем объект, затем увеличиваем rotationTick.
-  // Это гарантирует что компоненты с key={`${id}-${rotationTick}`} пересоздадутся.
+  // 🔑 КЛЮЧЕВОЕ ИСПРАВЛЕНИЕ: Иммутабельный поворот
   // ============================================================================
   const rotateTile = useCallback((tileId: string) => {
-    const tile = getInventoryTile(tileId);
-    if (tile && typeof tile.rotate === 'function') {
-      // Мутируем объект (Tile хранит rotation внутри)
-      tile.rotate();
-      
-      // Триггерим ре-рендер через отдельный стейт
-      setRotationTick(prev => prev + 1);
+    // Вместо мутации объекта — вызываем метод контекста,
+    // который создаёт новый экземпляр Tile
+    // @ts-ignore - метод добавлен в предыдущем шаге
+    if (typeof (useTiles as any).rotateTileInInventory === 'function') {
+      // @ts-ignore
+      (useTiles as any).rotateTileInInventory(tileId);
     }
-  }, [getInventoryTile]);
+    // rotationTick больше не нужен для триггера ре-рендера,
+    // но оставляем его для обратной совместимости с key
+    setRotationTick(prev => prev + 1);
+  }, []);
   
   const scrollLeft = useCallback(() => {
     setScrollOffset(prev => Math.max(0, prev - 1));

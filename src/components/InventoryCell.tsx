@@ -3,8 +3,9 @@
 // ============================================================================
 
 import React, { useMemo, useCallback, useRef, useEffect } from 'react';
-import { View, StyleSheet, Dimensions } from 'react-native';
+import { View, StyleSheet, Dimensions, Platform } from 'react-native';
 import { GestureDetector } from 'react-native-gesture-handler';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Tile } from '../models/Tile';
 import TileView from './TileView';
@@ -13,14 +14,12 @@ import {
   INVENTORY_CELL_SIZE, 
   INVENTORY_CELL_SPACING, 
   INVENTORY_CELL_BACKGROUND_COLOR, 
-  INVENTORY_CELL_BORDER_COLOR 
+  INVENTORY_CELL_BORDER_COLOR,
+  INVENTORY_HEIGHT,
 } from '../constants/inventory';
 import { useDraggable } from '../hooks/useDraggable';
 import { useTiles } from '../context/TilesContext';
 
-// ============================================================================
-// 🔑 Импорт системы крафта для прямой проверки
-// ============================================================================
 import { CraftingService } from '../services/CraftingService';
 import { CRAFTING_CONFIG } from '../constants/CraftingConfig';
 
@@ -37,9 +36,8 @@ const InventoryCell: React.FC<InventoryCellProps> = ({
   onTap,
   onDragStart,
 }) => {
-  // ============================================================================
-  // 🔑 Получаем ВСЕ необходимые методы из контекста (снаружи useCallback)
-  // ============================================================================
+  const insets = useSafeAreaInsets();
+  
   const { 
     removeFromInventory, 
     addToInventory, 
@@ -47,10 +45,18 @@ const InventoryCell: React.FC<InventoryCellProps> = ({
     getTileAt,
     addTile: ctxAddTile,
     removeTile: ctxRemoveTile,
+    rotateTileInInventory,
   } = useTiles();
   
   const placementSuccessRef = useRef(false);
   const textureSource = TEXTURE_MAP[tile.textureKey] || DEFAULT_TEXTURE;
+  
+  // ============================================================================
+  // 🔑 ГИБРИДНЫЙ ОТСТУП (должен совпадать с InventoryStrip)
+  // ============================================================================
+  const safeBottomInset = Platform.OS === 'android' 
+    ? Math.max(insets.bottom, 50)  
+    : (insets.bottom || 10);
   
   // ============================================================================
   // ВЫЧИСЛЕНИЕ ПОЗИЦИИ ЯЧЕЙКИ НА ЭКРАНЕ
@@ -67,20 +73,28 @@ const InventoryCell: React.FC<InventoryCellProps> = ({
     
     const pos = {
       x: startX + index * (INVENTORY_CELL_SIZE + cellSpacing),
-      y: screenHeight - 110 + 15,
+      // 👇 КЛЮЧЕВОЕ ИЗМЕНЕНИЕ:
+      // Поскольку InventoryStrip использует marginBottom, контейнер уже сдвинут вверх.
+      // Поэтому НЕ вычитаем safeBottomInset здесь — только высота инвентаря.
+      y: screenHeight - INVENTORY_HEIGHT + 15,
     };
     
     if (__DEV__) {
-      console.log(`[InventoryCell] 📍 Cell ${index} initialPosition:`, pos);
+      console.log(`[InventoryCell] 📍 Cell ${index} initialPosition:`, {
+        ...pos,
+        screenHeight,
+        INVENTORY_HEIGHT,
+        safeBottomInset,
+        insetsBottom: insets.bottom,
+      });
     }
     return pos;
-  }, [index]);
+  }, [index]); // 👇 Убрали insets.bottom из зависимостей
   
   // ============================================================================
   // КОЛБЭКИ
   // ============================================================================
   
-  // 🔑 handlePlaced — с ПРЯМОЙ проверкой крафта через CraftingService
   const handlePlaced = useCallback((
     cell: { col: number; row: number },
     placedTile?: Tile
@@ -96,9 +110,6 @@ const InventoryCell: React.FC<InventoryCellProps> = ({
       });
     }
     
-    // ========================================================================
-    // 🔑 ПРЯМАЯ ПРОВЕРКА КРАФТА (не через onPlaced из App.tsx)
-    // ========================================================================
     if (CRAFTING_CONFIG.enabled && CRAFTING_CONFIG.checkOnPlace) {
       if (__DEV__) {
         console.log(`[InventoryCell] 🔗 Direct craft check for ${tile.id}:`, {
@@ -110,12 +121,11 @@ const InventoryCell: React.FC<InventoryCellProps> = ({
       
       try {
         const result = CraftingService.onTilePlaced(
-          tile,  // Плитка из инвентаря
+          tile,
           cell.col,
           cell.row,
-          getTileAt,  // Функция получения плитки по координатам
+          getTileAt,
           {
-            // Операции с плитками
             removeTile: ctxRemoveTile,
             addTile: ctxAddTile,
             generateTileId: () => `craft-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
@@ -142,13 +152,11 @@ const InventoryCell: React.FC<InventoryCellProps> = ({
     ctxRemoveTile,
   ]);
   
-  // 🔑 handleReturned — определён!
   const handleReturned = useCallback(() => {
     setActiveInventoryTileId(null);
     if (__DEV__) {
       console.log(`[InventoryCell] 🔄 Returned ${tile.id} to inventory`);
     }
-    // Плитка уже в инвентаре, просто сбрасываем состояние
   }, [tile.id, setActiveInventoryTileId]);
   
   // ============================================================================
@@ -158,15 +166,11 @@ const InventoryCell: React.FC<InventoryCellProps> = ({
     tile,
     tile.id,
     initialPosition,
-    // ========================================================================
-    // 🔑 Колбэк onPlaced — вызывает handlePlaced с двумя аргументами
-    // ========================================================================
-    (cell, placedTile) => {
-      handlePlaced(cell, placedTile);
-    },
-    handleReturned,  // ← Теперь определён!
-    'INVENTORY'
-    // onDroppedInInventory не нужен для инвентаря
+    (cell, placedTile) => { handlePlaced(cell, placedTile); },
+    handleReturned,
+    'INVENTORY',
+    undefined,  
+    () => rotateTileInInventory?.(tile.id)  
   );
   
   // ============================================================================
@@ -176,7 +180,6 @@ const InventoryCell: React.FC<InventoryCellProps> = ({
     if (draggable.state === 'DRAGGING') {
       setActiveInventoryTileId(tile.id);
       
-      // Инициализировать global.inventoryDragState если не существует
       if (!global.inventoryDragState) {
         global.inventoryDragState = {
           isDragging: false,
@@ -190,7 +193,6 @@ const InventoryCell: React.FC<InventoryCellProps> = ({
       global.inventoryDragState.tileId = tile.id;
       global.inventoryDragState.rotation = draggable.rotation;
       
-      // Это позиция где плитка была ДО начала перетаскивания
       global.inventoryDragState.position = {
         x: initialPosition.x,
         y: initialPosition.y,
@@ -204,13 +206,10 @@ const InventoryCell: React.FC<InventoryCellProps> = ({
         });
       }
     } else if (global.inventoryDragState?.tileId === tile.id) {
-      // Драг закончился — сбрасываем флаги
       setActiveInventoryTileId(null);
       global.inventoryDragState.isDragging = false;
       global.inventoryDragState.tileId = null;
       global.inventoryDragState.rotation = 0;
-      
-      // ❌ НЕ сбрасываем position — он обновится при следующем драге
       
       if (__DEV__) {
         console.log(`[InventoryCell] 🛑 Drag END:`, {
@@ -222,7 +221,7 @@ const InventoryCell: React.FC<InventoryCellProps> = ({
   }, [draggable.state, tile.id, draggable.rotation, setActiveInventoryTileId, initialPosition]);
   
   // ============================================================================
-  // РЕНДЕР — ТОЛЬКО СТАТИЧНАЯ ПЛИТКА
+  // РЕНДЕР
   // ============================================================================
   return (
     <View style={styles.cell}>
@@ -238,7 +237,7 @@ const InventoryCell: React.FC<InventoryCellProps> = ({
             tileId={tile.id}
             rotation={tile.rotation}
             isInInventory={true}
-            tile={tile}  // ← Для отрисовки activeSide
+            tile={tile}
             debugLabel={`InventoryCell[${index}]-static`}
           />
         </View>
@@ -247,9 +246,6 @@ const InventoryCell: React.FC<InventoryCellProps> = ({
   );
 };
 
-// ============================================================================
-// СТИЛИ
-// ============================================================================
 const styles = StyleSheet.create({
   cell: {
     width: INVENTORY_CELL_SIZE,

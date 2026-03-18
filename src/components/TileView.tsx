@@ -1,6 +1,6 @@
 // src/components/TileView.tsx
 import React from 'react';
-import { Animated, Image, View, Text, StyleSheet, TouchableOpacity } from 'react-native';
+import { Image, View, Text, StyleSheet, TouchableOpacity } from 'react-native'
 import { StyleProp, ViewStyle } from 'react-native'; 
 import { useGrid } from '../context/GridContext';
 import { useZoom } from '../hooks/useZoom';
@@ -132,7 +132,7 @@ const TileView: React.FC<TileViewProps> = ({
   return (
     <>
       {/* 🔹 Основной контент плитки (как в оригинале) */}
-      <Animated.View style={[styles.tile, tileStyle]} {...(gesture ? { ...gesture.panHandlers } : {})}>
+      <View style={[styles.tile, tileStyle]} {...(gesture ? { ...gesture.panHandlers } : {})} collapsable={false}>
         
         {/* Изображение текстуры */}
         <Image 
@@ -162,7 +162,7 @@ const TileView: React.FC<TileViewProps> = ({
           </View>
         )}
         
-      </Animated.View>
+      </View>
       
       {/* ======================================================================== */}
       {/* 🔹 ПРОЗРАЧНЫЙ ОВЕРЛЕЙ ДЛЯ ТАПОВ (только для размещённых плиток)          */}

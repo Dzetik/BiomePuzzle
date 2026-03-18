@@ -234,5 +234,6 @@ export interface UseTileMachineOptions {
   onPlaced?: (cell: { col: number; row: number }) => void;
   /** Колбэк при возврате в спавнер */
   onReturned?: () => void;
+  onRotate?: (tileId: string) => void;
   isInSpawner?: boolean;
 }

@@ -17,7 +17,7 @@ export interface UseDraggableReturn {
   position: { x: number; y: number };
   width: number;
   height: number;
-  gesture: any;  // Gesture из react-native-gesture-handler
+  gesture: any;
   rotation: number;
   isInSpawner: boolean;
   isInInventory: boolean;
@@ -32,31 +32,34 @@ export interface UseDraggableReturn {
 }
 
 // ============================================================================
-// ГЛАВНАЯ ФУНКЦИЯ (адаптер)
-// ============================================================================
-// Принимает все параметры и передаёт их в useDraggableFSM.
+// ГЛАВНАЯ ФУНКЦИЯ (адаптер) — ИСПРАВЛЕННАЯ СИГНАТУРА
 // ============================================================================
 
 export const useDraggable = (
   initialTileData: Tile | null = null,
   tileId: string | null = null,
   externalInitialPosition: { x: number; y: number } | null = null,
-  onPlaced?: (
-    cell: { col: number; row: number },
-    tile?: Tile  
-  ) => void,
+  onPlaced?: (cell: { col: number; row: number }, tile?: Tile) => void,
   onReturned?: () => void,
-  source: 'SPAWNER' | 'INVENTORY' = 'SPAWNER',  
-  onDroppedInInventory?: () => void,
+  source: 'SPAWNER' | 'INVENTORY' = 'SPAWNER',  // 👈 6-й параметр, как в useDraggableFSM
+  onDroppedInInventory?: () => boolean,          // 👈 7-й параметр
+  onRotate?: (tileId: string) => void,           // 👈 8-й параметр — НОВЫЙ!
 ): UseDraggableReturn => {
+  
+  if (__DEV__ && onRotate) {
+    console.log(`[useDraggable index] ✅ onRotate received for source=${source}`);
+  }
+
+  // Передаём ВСЕ 8 параметров в useDraggableFSM в правильном порядке
   return useDraggableFSM(
     initialTileData,
     tileId,
     externalInitialPosition,
     onPlaced,
     onReturned,
-    source,
-    onDroppedInInventory  
+    source,                    // 👈 6
+    onDroppedInInventory,      // 👈 7
+    onRotate                   // 👈 8 — КЛЮЧЕВОЙ ФИКС!
   );
 };
 

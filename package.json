@@ -9,7 +9,7 @@
     "web": "expo start --web",
     "test": "jest --watchAll"
   },
-  "jest": {                          
+  "jest": {
     "preset": "jest-expo",
     "transformIgnorePatterns": [
       "node_modules/(?!((jest-)?react-native|@react-native(-community)?)|expo(nent)?|@expo(nent)?/.*|@expo-google-fonts/.*|react-navigation|@react-navigation/.*|@sentry/react-native|native-base|react-native-svg)"
@@ -17,10 +17,12 @@
   },
   "dependencies": {
     "expo": "~54.0.33",
+    "expo-constants": "~18.0.13",
     "expo-status-bar": "~3.0.9",
     "react": "19.1.0",
     "react-native": "0.81.5",
-    "react-native-gesture-handler": "~2.28.0"
+    "react-native-gesture-handler": "~2.28.0",
+    "react-native-safe-area-context": "~5.6.0"
   },
   "private": true,
   "devDependencies": {

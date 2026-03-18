@@ -7,6 +7,7 @@ import { Tile } from '../models/Tile';
 import { getRandomTileDefinition } from '../data/tileDefinitions';
 import { INVENTORY_MAX_SLOTS } from '../constants/inventory';
 import { GridService } from '../services/GridService';
+import { Rotation } from '../models/Tile.types';
 
 // ============================================================================
 // ТИПЫ
@@ -35,6 +36,8 @@ export interface TilesContextType {
   isCellOccupied: (col: number, row: number) => boolean;
   getTileAt: (col: number, row: number) => PlacedTileInfo | undefined;
   getOccupiedBounds: () => { minCol: number; maxCol: number; minRow: number; maxRow: number } | null;
+  rotateTileInInventory: (tileId: string) => void;
+  rotateSpawnerTile: () => void;
   
   // Атомарное обновление для крафта
   craftTiles: (
@@ -118,6 +121,27 @@ export const TilesProvider: React.FC<TilesProviderProps> = ({ children }) => {
   const getSpawnerTile = useCallback(() => spawnerTile, [spawnerTile]);
   const clearSpawnerTile = useCallback(() => setSpawnerTile(null), []);
   
+  // ============================================================================
+  // 🔑 НОВОЕ: Иммутабельный поворот плитки в инвентаре
+  // ============================================================================
+  const rotateTileInInventory = useCallback((tileId: string) => {
+    setInventoryTiles(prev => prev.map(tile => {
+      if (tile.id === tileId) {
+        // 🔹 Иммутабельное обновление: создаём новый экземпляр
+        return tile.rotated(); // или tile.withRotation(90) для конкретного угла
+      }
+      return tile;
+    }));
+  }, []);
+
+  const rotateSpawnerTile = useCallback(() => {
+    setSpawnerTile(prev => {
+      if (!prev) return prev;
+      // Создаём новый экземпляр с обновлённым rotation
+      return prev.rotated();
+    });
+  }, []);
+
   // --------------------------------------------------------------------------
   // МЕТОДЫ: РАЗМЕЩЁННЫЕ ПЛИТКИ (с синхронизацией GridService)
   // --------------------------------------------------------------------------
@@ -429,6 +453,8 @@ export const TilesProvider: React.FC<TilesProviderProps> = ({ children }) => {
     isCellOccupied,
     getTileAt,
     getOccupiedBounds,
+    rotateTileInInventory,
+    rotateSpawnerTile,
     
     craftTiles,
     

@@ -187,7 +187,7 @@ export class Tile {
   }
 
   // ============================================================================
-  // МЕТОД: ПОВОРОТ НА 90° ПО ЧАСОВОЙ СТРЕЛКЕ
+  // МЕТОД: ПОВОРОТ НА 90° ПО ЧАСОВОЙ СТРЕЛКЕ (МУТИРУЮЩИЙ — для внутренних нужд)
   // ============================================================================
   public rotate(): void {
     this._rotation = ((this._rotation + 90) % 360) as Rotation;
@@ -199,5 +199,50 @@ export class Tile {
 
   public getEdgeColor(edge: Edge): Color {
     return this.currentEdges[edge];
+  }
+
+  // ============================================================================
+  // 🔑🔑🔑 НОВЫЕ МЕТОДЫ ДЛЯ ИММУТАБЕЛЬНОГО ОБНОВЛЕНИЯ (для React) 🔑🔑🔑
+  // ============================================================================
+  
+  /**
+   * Создаёт НОВУЮ копию плитки с указанным поворотом.
+   * Не мутирует исходный объект — безопасно для React ре-рендеров.
+   * 
+   * @param newRotation - новый угол поворота (0 | 90 | 180 | 270)
+   * @returns новый экземпляр Tile с обновлённым rotation
+   * 
+   * @example
+   * const newTile = oldTile.withRotation(90);
+   * setTiles(prev => prev.map(t => t.id === oldTile.id ? newTile : t));
+   */
+  public withRotation(newRotation: Rotation): Tile {
+    return new Tile({
+      id: this.id,
+      textureKey: this.textureKey,
+      baseEdges: this._baseEdges,
+      activeSide: this._activeSide,
+      rotation: newRotation,
+    });
+  }
+
+  /**
+   * Создаёт НОВУЮ копию плитки, повёрнутую на +90° по часовой стрелке.
+   * Удобный хелпер для обработчиков кликов.
+   * 
+   * @returns новый экземпляр Tile с обновлённым rotation
+   * 
+   * @example
+   * const rotatedTile = tile.rotated();
+   * setInventoryTiles(prev => prev.map(t => t.id === tile.id ? rotatedTile : t));
+   */
+  public rotated(): Tile {
+    return new Tile({
+      id: this.id,
+      textureKey: this.textureKey,
+      baseEdges: this._baseEdges,
+      activeSide: this._activeSide,
+      rotation: ((this._rotation + 90) % 360) as Rotation, 
+    });
   }
 }

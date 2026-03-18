@@ -3,7 +3,8 @@
 // ============================================================================
 
 import React, { useEffect } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, Platform } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useInventory } from '../hooks/useInventory';
 import InventoryCell from './InventoryCell';
 import {
@@ -23,6 +24,17 @@ import {
 } from '../constants/inventory';
 
 const InventoryStrip: React.FC = () => {
+  const insets = useSafeAreaInsets();
+  
+  // ============================================================================
+  // 🔍 ОТЛАДКА: Проверяем, что insets работают
+  // ============================================================================
+  useEffect(() => {
+    if (__DEV__) {
+      console.log('[InventoryStrip] 🔍 SafeArea insets:', insets);
+    }
+  }, [insets]);
+  
   const {
     freeSlots,
     visibleTiles,
@@ -37,9 +49,6 @@ const InventoryStrip: React.FC = () => {
     rotationTick,
   } = useInventory();
 
-  // ============================================================================
-  // 🔍 ОТЛАДКА: Лог инвентаря
-  // ============================================================================
   useEffect(() => {
     if (__DEV__) {
       console.log('[InventoryStrip] 📊 State:', {
@@ -63,8 +72,24 @@ const InventoryStrip: React.FC = () => {
     }
   };
   
+  // ============================================================================
+  // 🔑 ГИБРИДНЫЙ ОТСТУП: используем insets ИЛИ запасной 50px для Android
+  // ============================================================================
+  const safeBottom = Platform.OS === 'android' 
+  ? Math.max(insets.bottom, 0)  // 👈 Минимум 50px для навигационной панели
+  : (insets.bottom || 10);
+  
   return (
-    <View style={styles.container} pointerEvents="box-none">
+    <View 
+      style={[
+        styles.container, 
+        { 
+          // 👇 marginBottom сдвигает ВЕСЬ контейнер вверх
+          marginBottom: safeBottom
+        }
+      ]} 
+      pointerEvents="box-none"
+    >
       <TouchableOpacity
         style={[styles.scrollButton, !canScrollLeft && styles.scrollButtonDisabled]}
         onPress={scrollLeft}
@@ -80,12 +105,9 @@ const InventoryStrip: React.FC = () => {
           <Text style={styles.counterLabel}>своб.</Text>
         </View>
         
-        {/* ============================================================================ */}
-        {/* 🔑 FIX: Уникальный ключ — только tile.id + rotationTick */}
-        {/* ============================================================================ */}
         {visibleTiles.map((tile, index) => (
           <InventoryCell
-            key={`${tile.id}-${rotationTick}`}  // ← Убрано tile.rotation из ключа!
+            key={`${tile.id}-${rotationTick}`}
             tile={tile}
             index={index}
             onTap={handleTileTap}
@@ -122,6 +144,7 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
     zIndex: 1000,
     overflow: 'visible', 
+    // ❌ paddingBottom убран — используем marginBottom в инлайновом стиле
   },
   scrollButton: {
     width: INVENTORY_SCROLL_BUTTON_SIZE,
