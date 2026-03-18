@@ -1,58 +1,29 @@
-import React, { useEffect, useState, useMemo, useRef } from 'react';
-import { View } from 'react-native';
+// src/components/GridView.js
+// ========================================
+// КОМПОНЕНТ ИГРОВОЙ СЕТКИ
+// Отрисовка всех ячеек базового грида (12×12)
+// Без виртуализации — проще, надёжнее, нет мерцания при скролле
+// ========================================
+import React, { useMemo } from 'react';
+import { View, StyleSheet } from 'react-native';
 import { GestureDetector } from 'react-native-gesture-handler';
 import CellView from './CellView';
 import { useGridPan } from '../hooks/useGridPan';
-import { useGrid } from '../context/GridContext';
-import { useZoom } from '../hooks/useZoom';
 import { useTiles } from '../context/TilesContext';
-import { getVisibleBounds } from '../utils/virtualGrid';
+import { BASE_GRID } from '../constants/grid';
 
 const GridView = () => {
   const panGesture = useGridPan();
-  const { offset } = useGrid();
-  const { scale } = useZoom();
   const { isCellOccupied } = useTiles();
   
-  // Используем ref для хранения предыдущих значений
-  const prevBoundsRef = useRef({ startCol: 0, endCol: 0, startRow: 0, endRow: 0 });
-  const [bounds, setBounds] = useState({ startCol: 0, endCol: 0, startRow: 0, endRow: 0 });
-  
-  // Вычисляем границы видимых ячеек только при изменении offset или scale
-  useEffect(() => {
-    const newBounds = getVisibleBounds(offset.x, offset.y, scale);
-    
-    // Проверяем, действительно ли изменились границы
-    if (newBounds.startCol !== prevBoundsRef.current.startCol ||
-        newBounds.endCol !== prevBoundsRef.current.endCol ||
-        newBounds.startRow !== prevBoundsRef.current.startRow ||
-        newBounds.endRow !== prevBoundsRef.current.endRow) {
-      
-      console.log('[GridView] Границы изменились:', newBounds);
-      setBounds(newBounds);
-      prevBoundsRef.current = newBounds;
-    }
-  }, [offset.x, offset.y, scale]); // Зависимости только от offset и scale
-  
-  // Мемоизируем создание ячеек
+  // ✅ Мемоизируем создание всех ячеек базового грида
+  // 12×12 = 144 ячейки — это достаточно мало для прямого рендера
+  // Без виртуализации код проще, надёжнее и нет мерцания при скролле
   const cells = useMemo(() => {
     const cellsArray = [];
-    const startCol = bounds.startCol;
-    const endCol = bounds.endCol;
-    const startRow = bounds.startRow;
-    const endRow = bounds.endRow;
     
-    // Ограничиваем количество ячеек для производительности
-    const maxCells = 500; // Максимальное количество ячеек за раз
-    let cellCount = 0;
-    
-    for (let row = startRow; row <= endRow; row++) {
-      for (let col = startCol; col <= endCol; col++) {
-        if (cellCount >= maxCells) {
-          console.warn('[GridView] Достигнут лимит ячеек:', maxCells);
-          break;
-        }
-        
+    for (let row = 0; row < BASE_GRID.ROWS; row++) {
+      for (let col = 0; col < BASE_GRID.COLS; col++) {
         cellsArray.push(
           <CellView 
             key={`${row}-${col}`} 
@@ -61,14 +32,11 @@ const GridView = () => {
             isOccupied={isCellOccupied(col, row)}
           />
         );
-        cellCount++;
       }
     }
     
-    console.log('[GridView] Создано ячеек:', cellsArray.length, 'bounds:', bounds);
-    
     return cellsArray;
-  }, [bounds.startCol, bounds.endCol, bounds.startRow, bounds.endRow, isCellOccupied]);
+  }, [isCellOccupied]); // Зависимость только от функции проверки занятости
 
   return (
     <GestureDetector gesture={panGesture}>
@@ -79,11 +47,14 @@ const GridView = () => {
   );
 };
 
-const styles = {
+const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: 'transparent',
+    // ✅ Важно: pointerEvents 'box-none' позволяет жестам проходить сквозь контейнер
+    // к ячейкам и плиткам, если это потребуется в будущем
+    pointerEvents: 'box-none',
   },
-};
+});
 
 export default GridView;

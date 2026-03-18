@@ -1,36 +1,25 @@
+// src/utils/gridUtils.js
 // ========================================
-// УТИЛИТЫ ДЛЯ РАБОТЫ С СЕТКОЙ
+// УТИЛИТЫ ДЛЯ РАБОТЫ С КООРДИНАТАМИ СЕТКИ
 // ========================================
+
 import { BASE_GRID, BASE_GRID_OFFSET } from '../constants/grid';
-// ✅ ОБНОВЛЕНО: импорт из SpawnerService вместо spawnerUtils
-import { SpawnerService } from '../services/SpawnerService';
-
-// ========================================
-// ФУНКЦИИ СЕТКИ
-// ========================================
+import { DEFAULT_TILE_SIZE } from '../constants/tile';
 
 /**
- * Получает центр конкретной ячейки сетки с учетом масштаба и смещения
+ * Вычисляет позицию левого верхнего угла ячейки с учётом смещения и зума
+ * @param {number} col - колонка
+ * @param {number} row - строка
+ * @param {number} scale - текущий масштаб
+ * @param {number} offsetX - смещение сетки по X
+ * @param {number} offsetY - смещение сетки по Y
+ * @returns {Object} { x: number, y: number }
  */
-export const getCellCenter = (col, row, scale = 1.0, offsetX = 0, offsetY = 0) => {
+export const getCellCornerWithOffset = (col, row, scale, offsetX, offsetY) => {
   const cellSize = BASE_GRID.CELL_SIZE * scale;
   const baseOffsetX = BASE_GRID_OFFSET.x * scale;
   const baseOffsetY = BASE_GRID_OFFSET.y * scale;
-  
-  return {
-    x: baseOffsetX + col * cellSize + cellSize / 2 - offsetX,
-    y: baseOffsetY + row * cellSize + cellSize / 2 - offsetY,
-  };
-};
 
-/**
- * Получает координаты верхнего левого угла ячейки
- */
-export const getCellCornerWithOffset = (col, row, scale = 1.0, offsetX = 0, offsetY = 0) => {
-  const cellSize = BASE_GRID.CELL_SIZE * scale;
-  const baseOffsetX = BASE_GRID_OFFSET.x * scale;
-  const baseOffsetY = BASE_GRID_OFFSET.y * scale;
-  
   return {
     x: baseOffsetX + col * cellSize - offsetX,
     y: baseOffsetY + row * cellSize - offsetY,
@@ -38,99 +27,190 @@ export const getCellCornerWithOffset = (col, row, scale = 1.0, offsetX = 0, offs
 };
 
 /**
- * Находит ближайшую ячейку по координатам центра плитки
+ * Вычисляет позицию для "примагничивания" плитки к центру ячейки
+ * @param {Object} tileSize - { width, height } размер плитки
+ * @param {number} col - колонка
+ * @param {number} row - строка
+ * @param {number} scale - текущий масштаб
+ * @param {number} offsetX - смещение сетки по X
+ * @param {number} offsetY - смещение сетки по Y
+ * @returns {Object} { x: number, y: number }
  */
-export const findNearestCell = (centerX, centerY, scale = 1.0, offsetX = 0, offsetY = 0) => {
+export const getSnapToCellPosition = (tileSize, col, row, scale, offsetX, offsetY) => {
+  const { x, y } = getCellCornerWithOffset(col, row, scale, offsetX, offsetY);
   const cellSize = BASE_GRID.CELL_SIZE * scale;
-  const baseOffsetX = BASE_GRID_OFFSET.x * scale;
-  const baseOffsetY = BASE_GRID_OFFSET.y * scale;
   
-  const gridX = (centerX + offsetX - baseOffsetX) / cellSize;
-  const gridY = (centerY + offsetY - baseOffsetY) / cellSize;
+  return {
+    x: x + (cellSize - tileSize.width) / 2,
+    y: y + (cellSize - tileSize.height) / 2,
+  };
+};
+
+// ============================================================================
+// 🔑 НОВЫЕ ФУНКЦИИ ДЛЯ ВАЛИДАЦИИ ГРАНИЦ ГРИДА
+// ============================================================================
+
+/**
+ * Проверяет, находится ли ячейка в пределах допустимого грида
+ * @param {number} col - колонка
+ * @param {number} row - строка
+ * @param {Object} bounds - опциональные кастомные границы
+ *   @param {number} bounds.minCol - минимальная колонка (по умолчанию 0)
+ *   @param {number} bounds.maxCol - максимальная колонка (по умолчанию BASE_GRID.COLS - 1)
+ *   @param {number} bounds.minRow - минимальная строка (по умолчанию 0)
+ *   @param {number} bounds.maxRow - максимальная строка (по умолчанию BASE_GRID.ROWS - 1)
+ * @returns {boolean} true если ячейка в пределах грида
+ */
+export const isCellWithinGrid = (col, row, bounds = null) => {
+  'worklet';
   
-  const col = Math.floor(gridX);
-  const row = Math.floor(gridY);
+  const minCol = bounds?.minCol ?? 0;
+  const maxCol = bounds?.maxCol ?? BASE_GRID.COLS - 1;
+  const minRow = bounds?.minRow ?? 0;
+  const maxRow = bounds?.maxRow ?? BASE_GRID.ROWS - 1;
   
-  return { col, row };
+  return (
+    Number.isInteger(col) && 
+    Number.isInteger(row) &&
+    col >= minCol && 
+    col <= maxCol && 
+    row >= minRow && 
+    row <= maxRow
+  );
 };
 
 /**
- * Получает размер ячейки с учетом масштаба
+ * Обёртка над getSnapToCellPosition с валидацией границ
+ * Возвращает null, если позиция вне грида — плитка не должна размещаться
+ * @param {Object} tileSize - { width, height }
+ * @param {number} col - колонка
+ * @param {number} row - строка
+ * @param {number} scale - масштаб
+ * @param {number} offsetX - смещение X
+ * @param {number} offsetY - смещение Y
+ * @param {Object} bounds - опциональные кастомные границы
+ * @returns {Object | null} позиция для привязки или null если вне границ
  */
-export const getCellSize = (scale = 1.0) => BASE_GRID.CELL_SIZE * scale;
+export const getValidatedSnapPosition = (
+  tileSize,
+  col,
+  row,
+  scale,
+  offsetX,
+  offsetY,
+  bounds = null
+) => {
+  'worklet';
+  
+  if (!isCellWithinGrid(col, row, bounds)) {
+    return null;
+  }
+  return getSnapToCellPosition(tileSize, col, row, scale, offsetX, offsetY);
+};
 
 /**
- * Получает количество колонок для рендера
+ * Получает дефолтные границы грида из констант
+ * @returns {Object} { minCol, maxCol, minRow, maxRow }
  */
-export const getGridCols = () => BASE_GRID.COLS;
-
-/**
- * Получает количество строк для рендера
- */
-export const getGridRows = () => BASE_GRID.ROWS;
-
-/**
- * Получает базовое смещение сетки с учетом масштаба
- */
-export const getGridOffset = (scale = 1.0) => ({
-  x: BASE_GRID_OFFSET.x * scale,
-  y: BASE_GRID_OFFSET.y * scale
+export const getDefaultGridBounds = () => ({
+  minCol: 0,
+  maxCol: BASE_GRID.COLS - 1,
+  minRow: 0,
+  maxRow: BASE_GRID.ROWS - 1,
 });
 
-// ========================================
-// ФУНКЦИИ ПРИТЯГИВАНИЯ (SNAP)
-// ========================================
-
 /**
- * Вычисляет позицию верхнего левого угла плитки для конкретной ячейки
+ * Преобразует экранные координаты в координаты ячейки грида
+ * (обратная операция к getCellCornerWithOffset)
+ * @param {number} screenX - координата X на экране
+ * @param {number} screenY - координата Y на экране
+ * @param {number} scale - текущий масштаб
+ * @param {number} offsetX - смещение сетки по X
+ * @param {number} offsetY - смещение сетки по Y
+ * @returns {Object} { col: number, row: number, fractionalX: number, fractionalY: number }
  */
-export const getSnapToCellPosition = (tileSize, col, row, scale = 1.0, offsetX = 0, offsetY = 0) => {
+export const getGridCoordsFromScreen = (screenX, screenY, scale, offsetX, offsetY) => {
   const cellSize = BASE_GRID.CELL_SIZE * scale;
   const baseOffsetX = BASE_GRID_OFFSET.x * scale;
   const baseOffsetY = BASE_GRID_OFFSET.y * scale;
-  
-  const centerX = baseOffsetX + col * cellSize + cellSize / 2 - offsetX;
-  const centerY = baseOffsetY + row * cellSize + cellSize / 2 - offsetY;
-  
+
+  // Учитываем, что offset инвертирован при панорамировании
+  const gridX = (screenX + offsetX - baseOffsetX) / cellSize;
+  const gridY = (screenY + offsetY - baseOffsetY) / cellSize;
+
   return {
-    x: centerX - tileSize.width / 2,
-    y: centerY - tileSize.height / 2,
+    col: Math.floor(gridX),
+    row: Math.floor(gridY),
+    fractionalX: gridX % 1,
+    fractionalY: gridY % 1,
   };
 };
 
 /**
- * Основная функция притягивания
- * Приоритет 1: спавнер (если в зоне притяжения)
- * Приоритет 2: сетка (ближайшая ячейка)
+ * Проверяет, находится ли точка экрана в пределах видимой области грида
+ * @param {number} screenX - координата X на экране
+ * @param {number} screenY - координата Y на экране
+ * @param {number} scale - текущий масштаб
+ * @param {number} offsetX - смещение сетки по X
+ * @param {number} offsetY - смещение сетки по Y
+ * @param {Object} bounds - опциональные кастомные границы
+ * @returns {boolean}
  */
-export const snapToGrid = (position, tileSize = null, scale = 1.0, offsetX = 0, offsetY = 0, spawnerPos = null) => {
-  if (!position || !tileSize) return { ...position };
-  
-  // ПРОВЕРКА СПАВНЕРА (приоритет 1)
-  if (spawnerPos) {
-    const centerX = position.x + tileSize.width / 2;
-    const centerY = position.y + tileSize.height / 2;
-    const spawnerCenterX = spawnerPos.x + spawnerPos.size / 2;
-    const spawnerCenterY = spawnerPos.y + spawnerPos.size / 2;
+export const isScreenPointInGrid = (screenX, screenY, scale, offsetX, offsetY, bounds = null) => {
+  const { col, row } = getGridCoordsFromScreen(screenX, screenY, scale, offsetX, offsetY);
+  return isCellWithinGrid(col, row, bounds);
+};
 
-    const distance = Math.sqrt(
-      Math.pow(centerX - spawnerCenterX, 2) + 
-      Math.pow(centerY - spawnerCenterY, 2)
-    );
+/**
+ * Вычисляет расстояние между двумя ячейками (манхэттенское)
+ * @param {Object} a - { col, row }
+ * @param {Object} b - { col, row }
+ * @returns {number}
+ */
+export const getCellDistance = (a, b) => {
+  return Math.abs(a.col - b.col) + Math.abs(a.row - b.row);
+};
 
-    const threshold = spawnerPos.size * 2;
+/**
+ * Получает соседние ячейки для данной (4-направленные)
+ * @param {number} col - колонка
+ * @param {number} row - строка
+ * @param {Object} bounds - опциональные границы для фильтрации
+ * @returns {Array<{ col: number, row: number }>}
+ */
+export const getAdjacentCells = (col, row, bounds = null) => {
+  const directions = [
+    { col: 0, row: -1 }, // вверх
+    { col: 0, row: 1 },  // вниз
+    { col: -1, row: 0 }, // влево
+    { col: 1, row: 0 },  // вправо
+  ];
 
-    // ✅ ОБНОВЛЕНО: используем SpawnerService вместо isCenterOverSpawner
-    if (distance < threshold || SpawnerService.isCenterOverSpawner(position, tileSize, spawnerPos)) {
-      // ✅ ОБНОВЛЕНО: используем SpawnerService вместо getSnapToSpawnerPosition
-      return SpawnerService.getSnapToSpawnerPosition(tileSize, spawnerPos);
-    }
-  }
-  
-  // ПРИТЯГИВАНИЕ К СЕТКЕ (приоритет 2)
-  const centerX = position.x + tileSize.width / 2;
-  const centerY = position.y + tileSize.height / 2;
-  const { col, row } = findNearestCell(centerX, centerY, scale, offsetX, offsetY);
-  
-  return getSnapToCellPosition(tileSize, col, row, scale, offsetX, offsetY);
+  return directions
+    .map(dir => ({ col: col + dir.col, row: row + dir.row }))
+    .filter(cell => isCellWithinGrid(cell.col, cell.row, bounds));
+};
+
+/**
+ * Получает соседние ячейки для данной (8-направленные, включая диагонали)
+ * @param {number} col - колонка
+ * @param {number} row - строка
+ * @param {Object} bounds - опциональные границы для фильтрации
+ * @returns {Array<{ col: number, row: number }>}
+ */
+export const getAdjacentCells8 = (col, row, bounds = null) => {
+  const directions = [
+    { col: 0, row: -1 },   // вверх
+    { col: 0, row: 1 },    // вниз
+    { col: -1, row: 0 },   // влево
+    { col: 1, row: 0 },    // вправо
+    { col: -1, row: -1 },  // вверх-влево
+    { col: 1, row: -1 },   // вверх-вправо
+    { col: -1, row: 1 },   // вниз-влево
+    { col: 1, row: 1 },    // вниз-вправо
+  ];
+
+  return directions
+    .map(dir => ({ col: col + dir.col, row: row + dir.row }))
+    .filter(cell => isCellWithinGrid(cell.col, cell.row, bounds));
 };

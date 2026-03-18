@@ -1,42 +1,92 @@
+// src/utils/constraints.js
+// ========================================
+// УТИЛИТЫ ОГРАНИЧЕНИЙ И ГРАНИЦ
+// ========================================
 import { Dimensions } from 'react-native';
 
 /**
- * Получает границы экрана с учетом размера элемента
- * @param {number} elementWidth - ширина элемента
- * @param {number} elementHeight - высота элемента
- * @returns {Object} { minX, maxX, minY, maxY }
- */
-export const getScreenBounds = (elementWidth, elementHeight) => {
-  const screenWidth = Dimensions.get('window').width;
-  const screenHeight = Dimensions.get('window').height;
-  
-  return {
-    minX: 0,
-    maxX: screenWidth - elementWidth,
-    minY: 0,
-    maxY: screenHeight - elementHeight,
-  };
-};
-
-/**
  * Ограничивает значение в заданных пределах
- * @param {number} value - исходное значение
- * @param {number} min - минимум
- * @param {number} max - максимум
- * @returns {number} ограниченное значение
  */
 export const clamp = (value, min, max) => {
-  'worklet'; // для возможной анимации позже
+  'worklet';
   return Math.min(Math.max(value, min), max);
 };
 
 /**
- * Ограничивает позицию в пределах экрана
- * @param {Object} position - { x, y }
- * @param {Object} bounds - { minX, maxX, minY, maxY }
- * @returns {Object} ограниченная позиция
+ * 🔥 ФИНАЛЬНАЯ ВЕРСИЯ: Ограничивает смещение (offset) панорамирования
+ * 
+ * 📐 Координатная система (React Native + Gesture Handler):
+ * - Позиция ячейки на экране: screenX = baseOffsetX + col * cellSize - offsetX
+ * - offsetX > 0 → грид сдвигается ВЛЕВО на экране
+ * - offsetX < 0 → грид сдвигается ВПРАВО на экране
+ * 
+ * @param {number} offsetX - текущее смещение по X
+ * @param {number} offsetY - текущее смещение по Y
+ * @param {number} scale - текущий масштаб (зум)
+ * @param {Object} gridConfig - { cols, rows, cellSize, baseOffset: {x, y} }
+ * @param {Object} screen - { width, height }
+ * @param {number} buffer - отступ в пикселях от края экрана
+ * 
+ * @returns {Object} { x: clampedOffsetX, y: clampedOffsetY }
  */
-export const clampPosition = (position, bounds) => ({
-  x: clamp(position.x, bounds.minX, bounds.maxX),
-  y: clamp(position.y, bounds.minY, bounds.maxY),
-});
+export const clampOffsetToGridBounds = (
+  offsetX,
+  offsetY,
+  scale,
+  gridConfig,
+  screen,
+  buffer = 0
+) => {
+  'worklet';
+  
+  const { cols, rows, cellSize, baseOffset } = gridConfig;
+  
+  // Масштабируем параметры
+  const scaledCellSize = cellSize * scale;
+  const scaledBaseX = baseOffset.x * scale;
+  const scaledBaseY = baseOffset.y * scale;
+  
+  const gridWidth = cols * scaledCellSize;
+  const gridHeight = rows * scaledCellSize;
+  
+  // ========================================
+  // 🧮 ЛОГИКА ОГРАНИЧЕНИЙ (ПРОВЕРЕННАЯ)
+  // ========================================
+  // Позиция левого края грида на экране: scaledBaseX - offsetX
+  // Позиция правого края грида на экране: scaledBaseX + gridWidth - offsetX
+  
+  // 🔹 Ограничение 1: Левый край не должен уходить левее (-buffer)
+  // scaledBaseX - offsetX >= -buffer
+  // => offsetX <= scaledBaseX + buffer
+  const maxOffsetX = scaledBaseX + buffer;
+  
+  // 🔹 Ограничение 2: Правый край не должен уходить правее (screenWidth + buffer)
+  // scaledBaseX + gridWidth - offsetX <= screen.width + buffer
+  // => offsetX >= scaledBaseX + gridWidth - screen.width - buffer
+  const minOffsetX = scaledBaseX + gridWidth - screen.width - buffer;
+  
+  // 🔹 То же самое для Y
+  const maxOffsetY = scaledBaseY + buffer;
+  const minOffsetY = scaledBaseY + gridHeight - screen.height - buffer;
+  
+  // ========================================
+  // 🔄 НОРМАЛИЗАЦИЯ (если грид меньше экрана)
+  // ========================================
+  const finalMinX = Math.min(minOffsetX, maxOffsetX);
+  const finalMaxX = Math.max(minOffsetX, maxOffsetX);
+  const finalMinY = Math.min(minOffsetY, maxOffsetY);
+  const finalMaxY = Math.max(minOffsetY, maxOffsetY);
+
+  return {
+    x: clamp(offsetX, finalMinX, finalMaxX),
+    y: clamp(offsetY, finalMinY, finalMaxY),
+  };
+};
+
+/**
+ * Получает размеры экрана
+ */
+export const getScreenDimensions = () => {
+  const { width, height } = Dimensions.get('window');
+  return { width, height };
+};

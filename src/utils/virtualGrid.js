@@ -1,4 +1,4 @@
-import { BASE_GRID, BASE_GRID_OFFSET, VIRTUAL_GRID, MAX_EMPTY_CELLS } from '../constants/grid';
+/*import { BASE_GRID, BASE_GRID_OFFSET, VIRTUAL_GRID, MAX_EMPTY_CELLS } from '../constants/grid';
 import { Dimensions } from 'react-native';
 
 export const getVisibleBounds = (offsetX, offsetY, scale) => {
@@ -54,4 +54,4 @@ export const clampOffset = (offsetX, offsetY, scale, bounds) => {
     x: Math.max(minOffsetX, Math.min(maxOffsetX, offsetX)),
     y: Math.max(minOffsetY, Math.min(maxOffsetY, offsetY)),
   };
-};
+};*/

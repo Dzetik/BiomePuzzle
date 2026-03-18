@@ -12,7 +12,7 @@ import { useTileMachine } from '../useTileMachine';
 import { UseDraggableReturn } from './index';
 import { getSpawnerSize } from '../../constants/spawner';
 import { DEFAULT_TILE_SIZE } from '../../constants/tile';
-import { BASE_GRID_OFFSET } from '../../constants/grid';
+import { BASE_GRID, BASE_GRID_OFFSET } from '../../constants/grid';
 import { useZoom } from '../useZoom';
 import { useSpawner } from '../useSpawner';
 import { useGrid } from '../../context/GridContext';
@@ -25,6 +25,7 @@ import {
   INVENTORY_DROP_ZONE_TOTAL_HEIGHT,
   INVENTORY_DROP_ZONE_PADDING_BOTTOM,
 } from '../../constants/inventory';
+import { isCellWithinGrid } from '../../utils/gridUtils';
 
 // ============================================================================
 // ГЛАВНЫЙ ХУК
@@ -115,7 +116,12 @@ export const useDraggableFSM = (
       cellSize: DEFAULT_TILE_SIZE.width,
       gridOffset: { x: offset?.x ?? 0, y: offset?.y ?? 0 },
       scale: scale ?? 1,
-      gridBounds: { startCol: -1, endCol: 6, startRow: -1, endRow: 12 },
+      gridBounds: { 
+        startCol: 0, 
+        endCol: BASE_GRID.COLS - 1, 
+        startRow: 0, 
+        endRow: BASE_GRID.ROWS - 1 
+      },
     });
   }, [offset?.x, offset?.y, scale]);
 
@@ -267,6 +273,12 @@ export const useDraggableFSM = (
     const cell = GridService.findCellAtPosition(endPosition.x, endPosition.y, tileSize);
     
     if (cell) {
+      if (!isCellWithinGrid(cell.col, cell.row)) {
+        if (__DEV__) console.log('[Draggable] ❌ Cell outside grid bounds:', cell);
+        send({ type: 'NO_CELL' });
+        return;
+      }
+
       const isFree = GridService.isCellFree(cell.col, cell.row);
       
       if (isFree) {

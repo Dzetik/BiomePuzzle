@@ -6,8 +6,8 @@ import { DEFAULT_TILE_SIZE } from './tile';
 
 // Базовые параметры сетки
 export const BASE_GRID = {
-  COLS: 12,                    // Количество колонок для рендера
-  ROWS: 12,                   // Количество строк для рендера
+  COLS: 5,                    // Количество колонок для рендера
+  ROWS: 8,                   // Количество строк для рендера
   CELL_SIZE: DEFAULT_TILE_SIZE.width, // 90px - базовый размер ячейки
 };
 
