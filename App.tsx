@@ -1,10 +1,15 @@
 // ========================================
-// ГЛАВНЫЙ ФАЙЛ ПРИЛОЖЕНИЯ (ФИНАЛЬНЫЙ)
+// ГЛАВНЫЙ ФАЙЛ ПРИЛОЖЕНИЯ (с автосохранением)
 // ========================================
 import React, { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { View, StyleSheet, StatusBar, LogBox, Text, TouchableOpacity, Platform } from 'react-native';
 import { GestureHandlerRootView, GestureDetector, Gesture } from 'react-native-gesture-handler';
-import { SafeAreaProvider } from 'react-native-safe-area-context'; // 👈 Добавлено
+import { SafeAreaProvider } from 'react-native-safe-area-context';
+
+// ============================================================================
+// 🔑 Импорт хука автосохранения
+// ============================================================================
+import { useAutoSave } from './src/hooks/useAutoSave';
 
 import TileView from './src/components/TileView';
 import GridView from './src/components/GridView';
@@ -34,11 +39,16 @@ import { CRAFTING_CONFIG } from './src/constants/CraftingConfig';
 import { CraftResult } from './src/services/CraftingService';
 import { Tile } from './src/models/Tile';
 
+import { 
+  loadGame as loadGameService, 
+  hasSave as hasSaveService 
+} from './src/services/SaveService';
+import { QUESTS } from './src/constants/quests';
+
 if (__DEV__) {
   LogBox.ignoreLogs([
     /Maximum update depth exceeded/,
     /Encountered two children with the same key/,
-    /Text strings must be rendered within a <Text> component/,
   ]);
 }
 
@@ -70,12 +80,14 @@ const PlacedTiles: React.FC<PlacedTilesProps> = ({ onPlacedTilePress }) => {
         const cellSize = DEFAULT_TILE_SIZE.width;
         const position = getSnapToCellPosition(
           { width: cellSize * scale, height: cellSize * scale },
-          entry.col, entry.row, scale, offset?.x || 0, offset?.y || 0
+          entry.col, entry.row, scale,
+          offset?.x || 0, offset?.y || 0
         );
         const textureSource = TEXTURE_MAP[tile.textureKey] || DEFAULT_TEXTURE;
 
         return (
           <TileView
+            // 👇 Ключ с rotation для корректного ре-рендера в APK
             key={`${tile.id}-${tile.rotation}`}
             textureSource={textureSource}
             position={position}
@@ -112,14 +124,31 @@ const GameContent = () => {
     removeTilesForQuest,
     rotateTileInInventory,
     rotateSpawnerTile,
+    saveGame,
+    loadGame,
+    hasSave,
   } = useTiles();
   
-  const { activeQuest, refreshQuest, submitQuest } = useQuests();
+  const { 
+    activeQuest, 
+    refreshQuest, 
+    submitQuest,
+    getQuestData,
+    setQuestProgressFromSave,
+    setActiveQuest,
+  } = useQuests();
+  
   const spawnerPos = useSpawner();
   const { offset } = useGrid();
+  
+  // ============================================================================
+  // 🔑 НОВОЕ: Флаг загрузки сохранения
+  // ============================================================================
+  const [isLoadingSave, setIsLoadingSave] = useState(true);
   const [isInitialized, setIsInitialized] = useState(false);
   const activeTileIdRef = useRef<string | null>(null);
   const hasActiveTileRef = useRef(false);
+  const spawnerTileRef = useRef<Tile | null>(null);
 
   const [inventoryDragTick, setInventoryDragTick] = useState(0);
   const [craftFeedback, setCraftFeedback] = useState<{ active: boolean; message?: string; recipeId?: string }>({ active: false });
@@ -127,25 +156,151 @@ const GameContent = () => {
   const [showQuestBook, setShowQuestBook] = useState(false);
   const [selectedPlacedTile, setSelectedPlacedTile] = useState<Tile | null>(null);
   
+  // Автосохранение
+  useAutoSave(30000);
+  
   const handlePlacedTilePress = useCallback((tile: Tile) => {
     if (__DEV__) console.log('[App] 🎯 Плитка выбрана:', tile.id);
     setSelectedPlacedTile(tile);
   }, []);
 
+  // ============================================================================
+  // 🔑 ЗАГРУЗКА СОХРАНЕНИЯ (исправленная версия)
+  // ============================================================================
   useEffect(() => {
+    const loadOnStart = async () => {
+      console.log('[App] 🔍 loadOnStart: BEGIN');
+      
+      await new Promise(resolve => setTimeout(resolve, 200));
+      
+      try {
+        const hasSavedGame = await hasSave();
+        console.log('[App] 🔍 hasSave result:', hasSavedGame);
+        
+        if (hasSavedGame) {
+          console.log('[App] 📂 Found save, loading...');
+          
+          // 🔑 ЧИТАЕМ ДАННЫЕ КВЕСТА ПРЯМО ИЗ СОХРАНЕНИЯ (не из global!)
+          const saved = await loadGameService(); // 👈 Прямой вызов сервиса
+          
+          if (saved) {
+            // 🔑 Берём activeQuestId из сохранённого объекта
+            const activeQuestId = saved.quest?.activeQuestId || null;
+            const activeQuestProgress = saved.quest?.activeQuestProgress || {};
+            const completedQuests = saved.quest?.completedQuests || [];
+            
+            console.log('[App] 🔍 Data from save:', {
+              activeQuestId,
+              questProgress: activeQuestProgress,
+            });
+            
+            // Загружаем состояние плиток (передаём прогресс для восстановления)
+            const restored = await loadGame(activeQuestProgress);
+            console.log('[App] 🔍 loadGame result:', restored);
+            
+            if (restored) {
+              // Восстанавливаем прогресс квеста
+              setQuestProgressFromSave(activeQuestProgress);
+              console.log('[App] ✅ Game loaded');
+              
+              // 🔑 ВОССТАНОВЛЕНИЕ АКТИВНОГО КВЕСТА (из saved, а не из global)
+              console.log('[App] 🔍 Restoring quest:', { activeQuestId });
+              
+              if (activeQuestId) {
+                const questToRestore = QUESTS.find(q => q.id === activeQuestId);
+                console.log('[App] 🔍 Quest search result:', {
+                  found: !!questToRestore,
+                  questId: questToRestore?.id,
+                });
+                
+                if (questToRestore) {
+                  setActiveQuest(questToRestore);
+                  console.log(`[App] 📜 Quest restored: ${activeQuestId}`);
+                } else {
+                  console.log(`[App] ⚠️ Quest ${activeQuestId} not found`);
+                  refreshQuest();
+                }
+              } else {
+                console.log('[App] ℹ️ No active quest in save, creating new');
+                refreshQuest();
+              }
+            } else {
+              console.log('[App] ❌ Load failed, starting new game');
+              refreshQuest();
+            }
+          } else {
+            console.log('[App] ℹ️ No save data, starting new game');
+            refreshQuest();
+          }
+        } else {
+          console.log('[App] ℹ️ No save found, starting new game');
+          refreshQuest();
+        }
+      } catch (error) {
+        console.error('[App] ❌ Load error:', error);
+        refreshQuest();
+      } finally {
+        setIsLoadingSave(false);
+        console.log('[App] 🔍 loadOnStart: END');
+      }
+    };
+    
+    loadOnStart();
+  }, []);
+
+  // Синхронизируй ref с актуальным значением:
+  useEffect(() => {
+    spawnerTileRef.current = getSpawnerTile();
+  }, [getSpawnerTile()]); 
+  // ============================================================================
+  // 🔑 2. ИНИЦИАЛИЗАЦИЯ СПАВНЕРА (только ПОСЛЕ загрузки сохранения)
+  // ============================================================================
+  useEffect(() => {
+    if (isLoadingSave) return;
+    
+    // 👇 Используй ref вместо вызова функции:
+    if (spawnerTileRef.current) {
+      console.log('[App] ⏭️ Spawner tile already exists (from save), skipping init');
+      setIsInitialized(true);
+      return;
+    }
+    
     if (spawnerPos?.size > 0 && !isInitialized) {
       console.log('[App] 🟢 Init spawner');
       const tile = createSpawnerTile();
-      if (tile?.id) { activeTileIdRef.current = tile.id; hasActiveTileRef.current = true; }
+      if (tile?.id) {
+        activeTileIdRef.current = tile.id;
+        hasActiveTileRef.current = true;
+        spawnerTileRef.current = tile; // 👈 Обновляем ref сразу
+      }
       setIsInitialized(true);
     }
-  }, [spawnerPos, createSpawnerTile, isInitialized]);
+  }, [spawnerPos, createSpawnerTile, isInitialized, isLoadingSave]);
 
-  useEffect(() => { refreshQuest(); }, [refreshQuest]);
+  useEffect(() => {
+    if (__DEV__) {
+      console.log('[App] 🔍 Quest state:', {
+        activeQuestId: activeQuest?.id,
+        hasQuest: !!activeQuest,
+        globalQuestData: (global as any).questData,
+      });
+    }
+  }, [activeQuest?.id]);
 
+  // Автосохранение при размонтировании (страховка)
+  useEffect(() => {
+    return () => {
+      saveGame();
+    };
+  }, []);
+
+  // Синхронизация рефа с текущей плиткой спавнера
   const spawnerTile = getSpawnerTile();
   useEffect(() => {
-    if (spawnerTile?.id) { activeTileIdRef.current = spawnerTile.id; hasActiveTileRef.current = true; }
+    if (spawnerTile?.id) { 
+      activeTileIdRef.current = spawnerTile.id; 
+      hasActiveTileRef.current = true; 
+    }
   }, [spawnerTile?.id]);
 
   const getInitialPosition = useCallback(() => {
@@ -184,9 +339,6 @@ const GameContent = () => {
     } else { if (__DEV__) console.log('[App] ❌ Inventory full'); return false; }
   }, [moveSpawnerTileToInventory, createSpawnerTile]);
 
-  // ============================================================================
-  // 🔑 ОБРАБОТЧИК ПОВОРОТА ДЛЯ ИНВЕНТАРЯ (иммутабельный)
-  // ============================================================================
   const handleInventoryRotate = useCallback((tileId: string) => {
     if (rotateTileInInventory) {
       rotateTileInInventory(tileId);
@@ -201,7 +353,7 @@ const GameContent = () => {
     undefined,
     'SPAWNER',
     handleDroppedInInventory,
-    rotateSpawnerTile  // 👈 ✅ Правильный колбэк для спавнера!
+    rotateSpawnerTile
   );
 
   const activeInventoryTile = activeInventoryTileId ? getInventoryTile(activeInventoryTileId) : null;
@@ -225,6 +377,19 @@ const GameContent = () => {
     const success = removeTilesForQuest(activeQuest.requirements);
     if (success) { submitQuest(getTileCounts()); if (__DEV__) console.log('[App] ✅ Квест сдан успешно'); }
   }, [activeQuest, removeTilesForQuest, submitQuest, getTileCounts]);
+
+  // ============================================================================
+  // 🔑 ОТЛАДКА: Лог перед рендером спавнера
+  // ============================================================================
+  useEffect(() => {
+    if (__DEV__ && spawnerTile) {
+      console.log(`[App] 🎨 Spawner tile:`, {
+        id: spawnerTile.id,
+        texture: spawnerTile.textureKey,
+        rotation: spawnerTile.rotation,
+      });
+    }
+  }, [spawnerTile]);
 
   return (
     <View style={styles.gameContainer}>
@@ -253,6 +418,7 @@ const GameContent = () => {
         <View style={styles.craftFeedback}><Text style={styles.craftFeedbackText}>✨ {craftFeedback.message || 'Крафт...'}</Text></View>
       )}
 
+      {/* 🔑 Рендер плитки спавнера */}
       {shouldRenderActiveTile && spawnerTile && draggableTile?.gesture && (
         <GestureDetector gesture={draggableTile.gesture}>
           <TileView
@@ -304,12 +470,12 @@ const GameContent = () => {
 };
 
 // ============================================================================
-// 🔑 ROOT COMPONENT С SafeAreaProvider
+// 🔑 ROOT COMPONENT
 // ============================================================================
 const App = () => {
   return (
     <GestureHandlerRootView style={styles.container}>
-      <SafeAreaProvider> {/* 👈 Оборачиваем всё приложение */}
+      <SafeAreaProvider>
         <ZoomProvider>
           <GridProvider>
             <TilesProvider>

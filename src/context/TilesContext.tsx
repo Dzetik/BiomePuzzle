@@ -1,13 +1,24 @@
 // ============================================================================
-// КОНТЕКСТ УПРАВЛЕНИЯ ПЛИТКАМИ (с синхронизацией GridService)
+// КОНТЕКСТ УПРАВЛЕНИЯ ПЛИТКАМИ (с синхронизацией GridService + сохранения)
 // ============================================================================
 
-import React, { createContext, useContext, useState, useCallback, ReactNode, useRef } from 'react';
+import React, { createContext, useContext, useState, useCallback, ReactNode, useRef, useEffect } from 'react';
 import { Tile } from '../models/Tile';
 import { getRandomTileDefinition } from '../data/tileDefinitions';
 import { INVENTORY_MAX_SLOTS } from '../constants/inventory';
 import { GridService } from '../services/GridService';
 import { Rotation } from '../models/Tile.types';
+// ============================================================================
+// 🔑 Импорт сервиса сохранений
+// ============================================================================
+import { 
+  saveGame as saveGameService, 
+  loadGame as loadGameService, 
+  hasSave as hasSaveService, 
+  serializeGame, 
+  deserializeGame,
+  SavedGame 
+} from '../services/SaveService';
 
 // ============================================================================
 // ТИПЫ
@@ -66,10 +77,17 @@ export interface TilesContextType {
   submitTile: (tileId: string) => void;
   
   // ============================================================================
-  // 🔑 НОВОЕ: Для системы квестов
+  // 🔑 Для системы квестов
   // ============================================================================
   getTileCounts: () => Record<string, number>;
   removeTilesForQuest: (requirements: Array<{ textureKey: string; required: number }>) => boolean;
+  
+  // ============================================================================
+  // 🔑 НОВОЕ: Сохранения
+  // ============================================================================
+  saveGame: () => Promise<boolean>;
+  loadGame: (questProgress?: Record<string, number>) => Promise<boolean>;
+  hasSave: () => Promise<boolean>;
 }
 
 // ============================================================================
@@ -92,7 +110,17 @@ export const TilesProvider: React.FC<TilesProviderProps> = ({ children }) => {
   const [inventoryTiles, setInventoryTiles] = useState<Tile[]>([]);
   const [activeInventoryTileId, setActiveInventoryTileId] = useState<string | null>(null);
   
+  // ============================================================================
+  // 🔑 НОВОЕ: Ref для актуальных значений в saveGame (решение проблемы замыканий)
+  // ============================================================================
+  const spawnerTileRef = useRef<Tile | null>(null);
+  const inventoryTilesRef = useRef<Tile[]>([]);
   const placedTilesRef = useRef<Map<string, PlacedTileInfo>>(new Map());
+  
+  // Синхронизация ref с состояниями
+  useEffect(() => { spawnerTileRef.current = spawnerTile; }, [spawnerTile]);
+  useEffect(() => { inventoryTilesRef.current = inventoryTiles; }, [inventoryTiles]);
+  useEffect(() => { placedTilesRef.current = placedTiles; }, [placedTiles]);
   
   // --------------------------------------------------------------------------
   // МЕТОДЫ: СПАВНЕР
@@ -122,13 +150,12 @@ export const TilesProvider: React.FC<TilesProviderProps> = ({ children }) => {
   const clearSpawnerTile = useCallback(() => setSpawnerTile(null), []);
   
   // ============================================================================
-  // 🔑 НОВОЕ: Иммутабельный поворот плитки в инвентаре
+  // 🔑 Иммутабельный поворот плитки в инвентаре
   // ============================================================================
   const rotateTileInInventory = useCallback((tileId: string) => {
     setInventoryTiles(prev => prev.map(tile => {
       if (tile.id === tileId) {
-        // 🔹 Иммутабельное обновление: создаём новый экземпляр
-        return tile.rotated(); // или tile.withRotation(90) для конкретного угла
+        return tile.rotated();
       }
       return tile;
     }));
@@ -137,13 +164,12 @@ export const TilesProvider: React.FC<TilesProviderProps> = ({ children }) => {
   const rotateSpawnerTile = useCallback(() => {
     setSpawnerTile(prev => {
       if (!prev) return prev;
-      // Создаём новый экземпляр с обновлённым rotation
       return prev.rotated();
     });
   }, []);
 
   // --------------------------------------------------------------------------
-  // МЕТОДЫ: РАЗМЕЩЁННЫЕ ПЛИТКИ (с синхронизацией GridService)
+  // МЕТОДЫ: РАЗМЕЩЁННЫЕ ПЛИТКИ
   // --------------------------------------------------------------------------
   
   const addTile = useCallback((col: number, row: number, tile: Tile) => {
@@ -170,7 +196,7 @@ export const TilesProvider: React.FC<TilesProviderProps> = ({ children }) => {
   }, []);
   
   // ============================================================================
-  // Атомарное обновление для крафта (с синхронизацией GridService)
+  // Атомарное обновление для крафта
   // ============================================================================
   const craftTiles = useCallback((
     removeIds: string[],
@@ -179,7 +205,6 @@ export const TilesProvider: React.FC<TilesProviderProps> = ({ children }) => {
     setPlacedTiles(prev => {
       const newMap = new Map(prev);
       
-      // Удаляем ингредиенты и освобождаем ячейки в GridService
       for (const id of removeIds) {
         const entry = newMap.get(id);
         if (entry) {
@@ -188,7 +213,6 @@ export const TilesProvider: React.FC<TilesProviderProps> = ({ children }) => {
         }
       }
       
-      // Добавляем результат и занимаем ячейку в GridService
       newMap.set(addInfo.tile.id, {
         tile: addInfo.tile,
         col: addInfo.col,
@@ -299,13 +323,10 @@ export const TilesProvider: React.FC<TilesProviderProps> = ({ children }) => {
       return false;
     }
     
-    // 🔹 Перемещаем сам объект плитки (не копию!) — избегаем дублирования ID
     const tile = entry.tile;
     
-    // 1. Добавляем в инвентарь
     setInventoryTiles(prev => [tile, ...prev]);
     
-    // 2. Удаляем с грида и освобождаем ячейку
     setPlacedTiles(prev => {
       const newMap = new Map(prev);
       newMap.delete(tileId);
@@ -321,7 +342,7 @@ export const TilesProvider: React.FC<TilesProviderProps> = ({ children }) => {
   }, [inventoryTiles.length]);
 
   // ============================================================================
-  // 🔑 «Сдать» плитку (заглушка под экономику)
+  // 🔑 «Сдать» плитку
   // ============================================================================
   const submitTile = useCallback((tileId: string) => {
     const entry = placedTilesRef.current.get(tileId);
@@ -330,9 +351,6 @@ export const TilesProvider: React.FC<TilesProviderProps> = ({ children }) => {
       return;
     }
     
-    // 🔹 Здесь будет логика начисления ресурсов
-    // Пример: addResources(getTileReward(entry.tile.textureKey));
-    
     if (__DEV__) {
       console.log('[TilesContext] 🎯 Плитка сдана:', {
         tileId,
@@ -340,7 +358,6 @@ export const TilesProvider: React.FC<TilesProviderProps> = ({ children }) => {
       });
     }
     
-    // Удаляем плитку с грида
     setPlacedTiles(prev => {
       const newMap = new Map(prev);
       newMap.delete(tileId);
@@ -351,18 +368,16 @@ export const TilesProvider: React.FC<TilesProviderProps> = ({ children }) => {
   }, []);
   
   // ============================================================================
-  // 🔑 НОВОЕ: Подсчёт плиток по типам (для квестов)
+  // 🔑 Подсчёт плиток по типам (для квестов)
   // ============================================================================
   const getTileCounts = useCallback((): Record<string, number> => {
     const counts: Record<string, number> = {};
     
-    // Считаем размещённые плитки
     for (const [, info] of placedTilesRef.current) {
       const key = info.tile.textureKey;
       counts[key] = (counts[key] || 0) + 1;
     }
     
-    // Считаем плитки в инвентаре
     for (const tile of inventoryTiles) {
       const key = tile.textureKey;
       counts[key] = (counts[key] || 0) + 1;
@@ -372,25 +387,22 @@ export const TilesProvider: React.FC<TilesProviderProps> = ({ children }) => {
   }, [inventoryTiles]);
 
   // ============================================================================
-  // 🔑 НОВОЕ: Удаление плиток для квеста (сначала с поля, потом из инвентаря)
+  // 🔑 Удаление плиток для квеста
   // ============================================================================
   const removeTilesForQuest = useCallback((
     requirements: Array<{ textureKey: string; required: number }>
   ): boolean => {
     const counts = getTileCounts();
     
-    // Проверяем, достаточно ли плиток
     for (const req of requirements) {
       if ((counts[req.textureKey] || 0) < req.required) {
         return false;
       }
     }
     
-    // Удаляем плитки для каждого требования
     for (const req of requirements) {
       let remaining = req.required;
       
-      // 1. Сначала удаляем с поля
       const tilesToRemove: string[] = [];
       for (const [tileId, info] of placedTilesRef.current) {
         if (remaining <= 0) break;
@@ -400,7 +412,6 @@ export const TilesProvider: React.FC<TilesProviderProps> = ({ children }) => {
         }
       }
       
-      // Удаляем найденные плитки с грида
       if (tilesToRemove.length > 0) {
         setPlacedTiles(prev => {
           const newMap = new Map(prev);
@@ -416,7 +427,6 @@ export const TilesProvider: React.FC<TilesProviderProps> = ({ children }) => {
         });
       }
       
-      // 2. Если нужно, удаляем из инвентаря
       if (remaining > 0) {
         setInventoryTiles(prev => {
           let removed = 0;
@@ -433,6 +443,102 @@ export const TilesProvider: React.FC<TilesProviderProps> = ({ children }) => {
     
     return true;
   }, [getTileCounts]);
+  
+  // ============================================================================
+  // 🔑 НОВОЕ: ФУНКЦИИ СОХРАНЕНИЯ (исправленные с использованием ref)
+  // ============================================================================
+  
+  const saveGame = useCallback(async (): Promise<boolean> => {
+    const questData = (global as any).questData || {
+      activeQuestId: null,
+      completedQuests: [],
+      activeQuestProgress: {},
+    };
+    
+    // 🔑 ИСПОЛЬЗУЕМ REF ДЛЯ АКТУАЛЬНЫХ ЗНАЧЕНИЙ (решение проблемы замыканий)
+    const savedData = serializeGame(
+      Array.from(placedTilesRef.current.values()),  // 👈 Ref вместо placedTiles
+      inventoryTilesRef.current,                     // 👈 Ref вместо inventoryTiles
+      spawnerTileRef.current,                        // 👈 Ref вместо spawnerTile
+      questData
+    );
+    
+    // 🔑 Лог для отладки
+    if (__DEV__) {
+      console.log('[TilesContext] 📦 Saving:', {
+        gridCount: savedData.grid.length,
+        inventoryCount: savedData.inventory.length,
+        spawnerId: savedData.spawner?.tileId,
+        questId: savedData.quest.activeQuestId,
+      });
+    }
+    
+    return await saveGameService(savedData);
+  }, []); // 👈 ПУСТОЙ МАССИВ — функция не пересоздаётся, ref всегда актуален
+  
+  const loadGame = useCallback(async (questProgress?: Record<string, number>): Promise<boolean> => {
+    const saved = await loadGameService();
+    if (!saved) return false;
+    
+    try {
+      // 🔑 Хелпер для создания плитки из сохранённых данных
+      const createTileFromSave = (data: { textureKey: string; rotation: number; activeSide?: string }) => {
+        return new Tile({
+          id: `restored-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+          textureKey: data.textureKey,
+          rotation: data.rotation as Rotation,
+          activeSide: data.activeSide as any,
+        });
+      };
+      
+      const restored = deserializeGame(saved, createTileFromSave);
+
+      console.log('[TilesContext] 📦 Restored:', {
+        gridCount: restored.grid.length,
+        inventoryCount: restored.inventory.length,
+        // 👇 ИСПРАВЛЕНО: restored.spawner — это Tile, у него .id, а не .tileId
+        spawnerId: restored.spawner?.id,
+        spawnerTexture: restored.spawner?.textureKey,
+        questId: restored.quest.activeQuestId,
+      });
+      
+      // Восстанавливаем грид
+      const newPlacedMap = new Map<string, PlacedTileInfo>();
+      restored.grid.forEach(item => {
+        newPlacedMap.set(item.tile.id, {
+          tile: item.tile,
+          col: item.col,
+          row: item.row,
+        });
+      });
+      setPlacedTiles(newPlacedMap);
+      placedTilesRef.current = newPlacedMap;
+      
+      // Восстанавливаем инвентарь
+      setInventoryTiles(restored.inventory);
+      
+      // Восстанавливаем спавнер
+      setSpawnerTile(restored.spawner);
+      
+      // Восстанавливаем прогресс квеста
+      if (questProgress && restored.quest.activeQuestId) {
+        (global as any).questData = {
+          ...(global as any).questData,
+          activeQuestProgress: questProgress,
+        };
+      }
+      
+      console.log('[TilesContext] ✅ Game restored');
+      return true;
+    } catch (error) {
+      console.error('[TilesContext] ❌ Restore failed:', error);
+      return false;
+    }
+  }, []);
+  
+  const hasSave = useCallback(async (): Promise<boolean> => {
+    return await hasSaveService(); 
+  }, []);
   
   // --------------------------------------------------------------------------
   // ЗНАЧЕНИЕ КОНТЕКСТА
@@ -470,17 +576,18 @@ export const TilesProvider: React.FC<TilesProviderProps> = ({ children }) => {
     activeInventoryTileId,
     setActiveInventoryTileId,
     
-    // ============================================================================
-    // 🔑 МЕТОДЫ ДЛЯ ДЕЙСТВИЙ С ПЛИТКАМИ
-    // ============================================================================
     movePlacedTileToInventory,
     submitTile,
     
-    // ============================================================================
-    // 🔑 НОВЫЕ МЕТОДЫ ДЛЯ КВЕСТОВ
-    // ============================================================================
     getTileCounts,
     removeTilesForQuest,
+    
+    // ============================================================================
+    // 🔑 ЭКСПОРТ ФУНКЦИЙ СОХРАНЕНИЯ
+    // ============================================================================
+    saveGame,
+    loadGame,
+    hasSave,
   };
   
   return (
