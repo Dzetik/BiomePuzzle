@@ -46,7 +46,6 @@ export interface TilesContextType {
   isCellFree: (col: number, row: number) => boolean;
   isCellOccupied: (col: number, row: number) => boolean;
   getTileAt: (col: number, row: number) => PlacedTileInfo | undefined;
-  getOccupiedBounds: () => { minCol: number; maxCol: number; minRow: number; maxRow: number } | null;
   rotateTileInInventory: (tileId: string) => void;
   rotateSpawnerTile: () => void;
   
@@ -61,10 +60,6 @@ export interface TilesContextType {
   addToInventory: (tile: Tile) => boolean;
   removeFromInventory: (tileId: string) => void;
   getInventoryTile: (tileId: string) => Tile | undefined;
-  getInventoryTiles: () => Tile[];
-  isInventoryFull: () => boolean;
-  getInventoryFreeSlots: () => number;
-  clearInventory: () => void;
   
   // Активная плитка
   activeInventoryTileId: string | null;
@@ -245,19 +240,6 @@ export const TilesProvider: React.FC<TilesProviderProps> = ({ children }) => {
     return undefined;
   }, []);
 
-  const getOccupiedBounds = useCallback(() => {
-    if (placedTiles.size === 0) return null;
-    
-    let minCol = Infinity, maxCol = -Infinity, minRow = Infinity, maxRow = -Infinity;
-    for (const [, info] of placedTiles) {
-      minCol = Math.min(minCol, info.col);
-      maxCol = Math.max(maxCol, info.col);
-      minRow = Math.min(minRow, info.row);
-      maxRow = Math.max(maxRow, info.row);
-    }
-    return { minCol, maxCol, minRow, maxRow };
-  }, [placedTiles]);
-  
   // --------------------------------------------------------------------------
   // МЕТОДЫ: ИНВЕНТАРЬ
   // --------------------------------------------------------------------------
@@ -278,11 +260,6 @@ export const TilesProvider: React.FC<TilesProviderProps> = ({ children }) => {
   const getInventoryTile = useCallback((tileId: string): Tile | undefined => 
     inventoryTiles.find(t => t.id === tileId), [inventoryTiles]);
   
-  const getInventoryTiles = useCallback(() => inventoryTiles, [inventoryTiles]);
-  const isInventoryFull = useCallback(() => inventoryTiles.length >= INVENTORY_MAX_SLOTS, [inventoryTiles.length]);
-  const getInventoryFreeSlots = useCallback(() => Math.max(0, INVENTORY_MAX_SLOTS - inventoryTiles.length), [inventoryTiles.length]);
-  const clearInventory = useCallback(() => setInventoryTiles([]), []);
-
   // ============================================================================
   // МЕТОД: ПЕРЕМЕЩЕНИЕ ПЛИТКИ ИЗ СПАВНЕРА В ИНВЕНТАРЬ
   // ============================================================================
@@ -558,7 +535,6 @@ export const TilesProvider: React.FC<TilesProviderProps> = ({ children }) => {
     isCellFree,
     isCellOccupied,
     getTileAt,
-    getOccupiedBounds,
     rotateTileInInventory,
     rotateSpawnerTile,
     
@@ -568,11 +544,6 @@ export const TilesProvider: React.FC<TilesProviderProps> = ({ children }) => {
     addToInventory,
     removeFromInventory,
     getInventoryTile,
-    getInventoryTiles,
-    isInventoryFull,
-    getInventoryFreeSlots,
-    clearInventory,
-    
     activeInventoryTileId,
     setActiveInventoryTileId,
     

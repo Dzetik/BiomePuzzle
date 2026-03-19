@@ -38,9 +38,8 @@ const InventoryCell: React.FC<InventoryCellProps> = ({
 }) => {
   const insets = useSafeAreaInsets();
   
-  const { 
-    removeFromInventory, 
-    addToInventory, 
+  const {
+    removeFromInventory,
     setActiveInventoryTileId,
     getTileAt,
     addTile: ctxAddTile,
