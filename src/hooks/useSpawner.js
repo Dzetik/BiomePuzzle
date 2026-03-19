@@ -2,61 +2,59 @@ import { useState, useEffect, useCallback } from 'react';
 import { Dimensions } from 'react-native';
 import { getSpawnerSize, getSpawnerPositionConfig } from '../constants/spawner';
 
-// ========================================
-// Хук для отслеживания позиции спавнера на экране
-// Спавнер - это зелёная область, куда возвращаются плитки
-// Его позиция зависит от размеров экрана и должна пересчитываться при повороте
-// ========================================
+// ============================================================================
+// ХУК ПОЗИЦИИ СПАВНЕРА
+// ============================================================================
 
+/**
+ * Отслеживает актуальную позицию и размер спавнера на экране.
+ *
+ * Спавнер — область в правом верхнем углу экрана, где появляется новая плитка.
+ * Его позиция зависит от ширины экрана и пересчитывается при изменении
+ * ориентации устройства или размера окна (разделённый экран на Android).
+ *
+ * @returns {{ x: number, y: number, size: number }} — текущая позиция и размер спавнера
+ */
 export const useSpawner = () => {
-  // Состояние для хранения позиции и размера спавнера
-  // Используем функцию инициализации, чтобы вычислить сразу при создании хука
+  /**
+   * Позиция инициализируется сразу при создании хука через функцию-инициализатор,
+   * что исключает рендер с нулевыми координатами.
+   */
   const [spawnerPos, setSpawnerPos] = useState(() => {
-    // Получаем текущую ширину экрана
     const { width: screenWidth } = Dimensions.get('window');
-    
-    // Получаем размер спавнера из конфига (100px)
     const spawnerSize = getSpawnerSize();
-    
-    // Получаем конфигурацию позиции (отступ справа 20px, сверху 80px)
     const positionConfig = getSpawnerPositionConfig();
-    
-    // Вычисляем координаты:
-    // x = ширина экрана - размер спавнера - отступ справа
-    // y = отступ сверху (фиксированный)
+
+    // x = правый край экрана минус ширина спавнера минус отступ
     const x = screenWidth - spawnerSize - positionConfig.offset.right;
+    // y = фиксированный отступ сверху
     const y = positionConfig.offset.top;
-    
+
     return { x, y, size: spawnerSize };
   });
 
-  // Функция обновления позиции спавнера
-  // Вызывается при изменении размеров экрана (поворот, разделённый экран)
+  /**
+   * Пересчитывает и сохраняет позицию спавнера по текущим размерам экрана.
+   *
+   * Мемоизирован без зависимостей: вызываемые функции (getSpawnerSize,
+   * getSpawnerPositionConfig, Dimensions) стабильны между рендерами.
+   */
   const updateSpawnerPosition = useCallback(() => {
-    // Получаем актуальную ширину экрана
     const { width: screenWidth } = Dimensions.get('window');
-    
-    // Заново получаем размер и конфигурацию (на случай если они изменятся)
     const spawnerSize = getSpawnerSize();
     const positionConfig = getSpawnerPositionConfig();
-    
-    // Пересчитываем координаты
+
     const x = screenWidth - spawnerSize - positionConfig.offset.right;
     const y = positionConfig.offset.top;
-    
+
     setSpawnerPos({ x, y, size: spawnerSize });
-  }, []); // Нет зависимостей, так как все функции не меняются
+  }, []);
 
-  // Эффект для отслеживания изменений размеров экрана
+  // Подписка на изменение размеров экрана (поворот, split-screen)
   useEffect(() => {
-    // Подписываемся на событие изменения размеров
     const subscription = Dimensions.addEventListener('change', updateSpawnerPosition);
-    
-    // Отписываемся при размонтировании
     return () => subscription?.remove();
-  }, [updateSpawnerPosition]); // Зависимость стабильна из-за useCallback
+  }, [updateSpawnerPosition]);
 
-  // Возвращаем актуальную позицию спавнера
-  // { x: number, y: number, size: number }
   return spawnerPos;
 };

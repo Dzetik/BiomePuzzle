@@ -1,7 +1,7 @@
 // ============================================================================
-// ЖЕСТЫ ДЛЯ ПЕРЕТАСКИВАНИЯ ПЛИТКИ (ИСПРАВЛЕННЫЙ)
+// ЖЕСТЫ ДЛЯ ПЕРЕТАСКИВАНИЯ ПЛИТКИ
 // ============================================================================
-// Этот модуль содержит общую логику жестов (Pan, Tap) для всех источников плиток.
+// Содержит общую логику Pan и Tap жестов для всех источников плиток.
 // Используется в useDraggable.fsm.ts для интеграции с машиной состояний.
 // ============================================================================
 
@@ -13,24 +13,54 @@ import { INVENTORY_CELL_SIZE } from '../../constants/inventory';
 // ПАРАМЕТРЫ ЖЕСТОВ
 // ============================================================================
 
+/**
+ * Параметры для создания жестов перетаскивания.
+ *
+ * Передаются из `useDraggableFSM` — включают ссылки на FSM,
+ * ref-переменные для позиции и вспомогательные колбэки.
+ */
 export interface GestureParams {
+  /** Текущее состояние FSM — определяет, активен ли жест. */
   state: TileState;
+  /** Функция отправки событий в FSM. */
   send: (event: TileEvent) => void;
-  positionRef: React.MutableRefObject<{ x: number; y: number }>;
-  dragStartRef: React.MutableRefObject<{ x: number; y: number } | null>;
+  /** Ref текущей позиции плитки (верхний левый угол). */
+  positionRef: React.RefObject<{ x: number; y: number }>;
+  /** Ref позиции плитки в начале жеста — база для вычисления translation. */
+  dragStartRef: React.RefObject<{ x: number; y: number } | null>;
+  /** Принудительный ре-рендер для обновления UI во время drag. */
   forceUpdate: () => void;
+  /** Размер плитки в пикселях с учётом текущего масштаба. */
   tileSize: number;
-  scaleRef: React.MutableRefObject<number>;
+  /** Ref текущего масштаба сетки. */
+  scaleRef: React.RefObject<number>;
+  /** Animated.ValueXY для обновления позиции без ре-рендера. */
   animated?: {
-    position: any; // Animated.ValueXY
+    position: any;
   };
+  /** Колбэк окончания drag с финальной позицией плитки. */
   onDragEnd?: (position: { x: number; y: number }) => void;
 }
 
 // ============================================================================
-// ГЛАВНАЯ ФУНКЦИЯ: СОЗДАНИЕ ЖЕСТОВ
+// СОЗДАНИЕ ЖЕСТОВ
 // ============================================================================
 
+/**
+ * Создаёт Pan, Tap и составной жест для плитки.
+ *
+ * Два режима перемещения плитки:
+ * - **Спавнер**: позиция вычисляется как `dragStart + translation` —
+ *   плитка "тянется" относительно точки захвата.
+ * - **Инвентарь**: позиция вычисляется как `absoluteXY - tileSize/2` —
+ *   плитка немедленно центрируется под пальцем для удобства.
+ *
+ * `global.inventoryDragState` обновляется для синхронизации с App.tsx,
+ * который отображает "тень" плитки поверх всего интерфейса во время drag.
+ *
+ * @param params - параметры жестов (см. GestureParams)
+ * @returns объект с panGesture, tapGesture и composedGesture
+ */
 export const createDraggableGestures = ({
   state,
   send,
@@ -38,39 +68,36 @@ export const createDraggableGestures = ({
   dragStartRef,
   forceUpdate,
   tileSize,
-  scaleRef,
   animated,
   onDragEnd,
 }: GestureParams) => {
-  
+
   // ============================================================================
-  // ЖЕСТ ПЕРЕТАСКИВАНИЯ (PAN) — ФИНАЛЬНАЯ ВЕРСИЯ
+  // ЖЕСТ ПЕРЕТАСКИВАНИЯ (PAN)
   // ============================================================================
+
   const panGesture = Gesture.Pan()
+    // Жест активен только в состояниях покоя и перетаскивания
     .enabled(state === 'SPAWNER_IDLE' || state === 'INVENTORY_IDLE' || state === 'DRAGGING')
-    .activateAfterLongPress(0)
-    .minDistance(10)
-    
+    .activateAfterLongPress(0) // Мгновенная активация без ожидания
+    .minDistance(10)           // Минимальное смещение для различения drag от tap
+
     // НАЧАЛО ПЕРЕТАСКИВАНИЯ
     .onStart((e) => {
-      // ============================================================================
-      // 🔑 Для инвентаря — сразу ставим позицию ПОД ПАЛЕЦ
-      // ============================================================================
       if (state === 'INVENTORY_IDLE') {
+        // Инвентарь: плитку центрируем под пальцем сразу при начале жеста
         const newPosition = {
           x: e.absoluteX - tileSize / 2,
           y: e.absoluteY - tileSize / 2,
         };
-        
+
         positionRef.current = newPosition;
-        
+
         if (animated?.position) {
           animated.position.setValue(newPosition);
         }
-        
-        // ============================================================================
-        // 🔑 Обновляем global для App.tsx
-        // ============================================================================
+
+        // Инициализируем global.inventoryDragState для App.tsx (отрисовка тени)
         if (!global.inventoryDragState) {
           global.inventoryDragState = {
             position: { x: 0, y: 0 },
@@ -84,98 +111,99 @@ export const createDraggableGestures = ({
         global.inventoryDragState.isDragging = true;
         global.inventoryDragState.tileId = '';
         global.inventoryDragState.rotation = 0;
-        
-        // 🔑 Для инвентаря — dragStartRef = текущая позиция (не будет использоваться)
+
         dragStartRef.current = { ...newPosition };
-        
+
         if (__DEV__) {
-          console.log(`[Gesture] 🎯 Inventory drag START at finger:`, {
+          console.log(`[Gesture] Inventory drag START at finger:`, {
             finger: { x: e.absoluteX, y: e.absoluteY },
             tile: newPosition,
           });
         }
-        
+
         send({ type: 'TAKEN_FROM_INVENTORY' });
       } else {
-        // Для спавнера — оставляем как было
+        // Спавнер: фиксируем начальную позицию для дальнейшего вычисления дельты
         dragStartRef.current = { ...positionRef.current };
-        
+
         if (state === 'SPAWNER_IDLE') {
           send({ type: 'TAKEN_FROM_SPAWN' });
         }
       }
     })
-    
+
     // ПЕРЕМЕЩЕНИЕ ПЛИТКИ
     .onUpdate((e) => {
       if (state !== 'DRAGGING' || !dragStartRef.current) return;
-      
-      // ============================================================================
-      // 🔑 Для инвентаря — используем absolute координаты, не translation
-      // ============================================================================
+
       if (global.inventoryDragState?.isDragging) {
-        // Для инвентаря: позиция = текущая позиция пальца - половина плитки
+        // Инвентарь: абсолютные координаты минус половина плитки — центр под пальцем
         const newPosition = {
           x: e.absoluteX - tileSize / 2,
           y: e.absoluteY - tileSize / 2,
         };
-        
+
         positionRef.current = newPosition;
-        
+
         if (animated?.position) {
           animated.position.setValue(newPosition);
         }
-        
+
         global.inventoryDragState.position = newPosition;
       } else {
-        // Для спавнера — оставляем как было (translation)
+        // Спавнер: начальная позиция + накопленное смещение от gesture handler
         const newX = dragStartRef.current.x + e.translationX;
         const newY = dragStartRef.current.y + e.translationY;
-        
+
         positionRef.current = { x: newX, y: newY };
-        
+
         if (animated?.position) {
           animated.position.setValue({ x: newX, y: newY });
         }
       }
-      
-      // ============================================================================
-      // 🔑 Обновляем global для App.tsx
-      // ============================================================================
+
+      // Синхронизируем global.inventoryDragState для App.tsx
       if (global.inventoryDragState?.isDragging) {
         global.inventoryDragState.position = positionRef.current;
       }
-      
+
       send({ type: 'DRAG_MOVE', payload: { ...positionRef.current } });
       forceUpdate();
     })
-    
+
     // КОНЕЦ ПЕРЕТАСКИВАНИЯ
-    .onEnd((e) => {
+    .onEnd(() => {
       if (state === 'DRAGGING') {
         const endPosition = { x: positionRef.current.x, y: positionRef.current.y };
+        // Передаём финальную позицию в useDraggableFSM для поиска целевой ячейки
         onDragEnd?.(endPosition);
       }
       dragStartRef.current = null;
     });
 
-  // --------------------------------------------------------------------------
-  // ЖЕСТ ТАПА (ДЛЯ ПОВОРОТА)
-  // --------------------------------------------------------------------------
+  // ============================================================================
+  // ЖЕСТ ТАПА (для поворота плитки)
+  // ============================================================================
+
   const tapGesture = Gesture.Tap()
+    // Доступен только в состояниях покоя, не во время drag
     .enabled(state === 'SPAWNER_IDLE' || state === 'INVENTORY_IDLE')
-    .maxDuration(250)
-    .maxDistance(10)
+    .maxDuration(250)  // Тап не длиннее 250 мс
+    .maxDistance(10)   // Смещение не более 10 px — иначе это начало drag
     .onStart(() => {
       if (__DEV__) {
-        console.log(`[Gesture] 🎯 Tap detected! state=${state}`);
+        console.log(`[Gesture] Tap detected! state=${state}`);
       }
+      // FSM обработает ROTATE через executeAction -> ROTATE_TILE -> onRotate
       send({ type: 'ROTATE' });
     });
 
-  // --------------------------------------------------------------------------
+  // ============================================================================
   // СОСТАВНОЙ ЖЕСТ
-  // --------------------------------------------------------------------------
+  // ============================================================================
+
+  // Simultaneous позволяет одновременно распознавать Pan и Tap.
+  // Gesture handler сам разберёт, какой из них активировался первым.
   const composedGesture = Gesture.Simultaneous(panGesture, tapGesture);
 
   return {

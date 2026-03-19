@@ -1,9 +1,8 @@
-// src/components/GridView.js
-// ========================================
+// ============================================================================
 // КОМПОНЕНТ ИГРОВОЙ СЕТКИ
-// Отрисовка всех ячеек базового грида (12×12)
-// Без виртуализации — проще, надёжнее, нет мерцания при скролле
-// ========================================
+// Отрисовка всех ячеек базового грида без виртуализации
+// ============================================================================
+
 import React, { useMemo } from 'react';
 import { View, StyleSheet } from 'react-native';
 import { GestureDetector } from 'react-native-gesture-handler';
@@ -12,13 +11,25 @@ import { useGridPan } from '../hooks/useGridPan';
 import { useTiles } from '../context/TilesContext';
 import { BASE_GRID } from '../constants/grid';
 
+/**
+ * Рендерит все ячейки игровой сетки и оборачивает их в GestureDetector для панорамирования.
+ *
+ * Список ячеек строится через `useMemo` и пересчитывается только при изменении
+ * `isCellOccupied` — то есть когда меняется состояние заполненности сетки.
+ * Для сеток небольшого размера (BASE_GRID.COLS × BASE_GRID.ROWS) виртуализация
+ * не требуется; все ячейки рендерятся одновременно.
+ *
+ * Жест панорамирования предоставляется хуком `useGridPan` — он обновляет offset
+ * в GridContext, который затем используют CellView и PlacedTile для вычисления
+ * своих экранных позиций.
+ *
+ * Стиль контейнера: `pointerEvents: 'box-none'` — контейнер не перехватывает тапы
+ * сам по себе, только дочерние элементы (CellView) могут их получать.
+ */
 const GridView = () => {
   const panGesture = useGridPan();
   const { isCellOccupied } = useTiles();
-  
-  // ✅ Мемоизируем создание всех ячеек базового грида
-  // 12×12 = 144 ячейки — это достаточно мало для прямого рендера
-  // Без виртуализации код проще, надёжнее и нет мерцания при скролле
+
   const cells = useMemo(() => {
     const cellsArray = [];
     
@@ -36,8 +47,7 @@ const GridView = () => {
     }
     
     return cellsArray;
-  }, [isCellOccupied]); // Зависимость только от функции проверки занятости
-
+  }, [isCellOccupied]); 
   return (
     <GestureDetector gesture={panGesture}>
       <View style={styles.container}>
@@ -51,8 +61,6 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: 'transparent',
-    // ✅ Важно: pointerEvents 'box-none' позволяет жестам проходить сквозь контейнер
-    // к ячейкам и плиткам, если это потребуется в будущем
     pointerEvents: 'box-none',
   },
 });

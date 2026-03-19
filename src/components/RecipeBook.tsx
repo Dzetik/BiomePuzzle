@@ -1,5 +1,5 @@
 // ============================================================================
-// КОМПОНЕНТ: КНИГА РЕЦЕПТОВ
+// КНИГА РЕЦЕПТОВ
 // ============================================================================
 
 import React from 'react';
@@ -18,20 +18,25 @@ import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { Recipe, RECIPES } from '../constants/recipes';
 import { TEXTURE_MAP, DEFAULT_TEXTURE } from '../constants/textures';
 
-// ============================================================================
-// 🔑 ИЗМЕНЕНО: Размеры плиток
-// ============================================================================
-const RECIPE_TILE_SIZE = 45;           // Размер плиток ингредиентов
-const RECIPE_RESULT_TILE_SIZE = 65;    // 🔑 Результат больше (было 50)
+const RECIPE_TILE_SIZE = 45;           
+const RECIPE_RESULT_TILE_SIZE = 65;  
 const RECIPE_TILE_SPACING = 8;
 
 // ============================================================================
-// КОМПОНЕНТ: Отображение одной плитки в рецепте
+// Отображение одной плитки в рецепте
 // ============================================================================
-const RecipeTile: React.FC<{ 
-  textureKey: string; 
+
+/**
+ * Иконка одной плитки внутри строки рецепта.
+ *
+ * @param textureKey - ключ текстуры из TEXTURE_MAP
+ * @param label      - подпись под иконкой (обычно textureKey)
+ * @param isResult   - если true, используется увеличенный размер RECIPE_RESULT_TILE_SIZE
+ */
+const RecipeTile: React.FC<{
+  textureKey: string;
   label?: string;
-  isResult?: boolean;  // 🔑 Флаг для увеличенного размера
+  isResult?: boolean;
 }> = ({
   textureKey,
   label,
@@ -57,6 +62,12 @@ const RecipeTile: React.FC<{
 // ============================================================================
 // КОМПОНЕНТ: Переносимые ингредиенты
 // ============================================================================
+
+/**
+ * Горизонтальная цепочка ингредиентов рецепта со стрелками «→» между ними.
+ *
+ * @param sequence - упорядоченный список textureKey ингредиентов
+ */
 const RecipeIngredients: React.FC<{ sequence: string[] }> = ({ sequence }) => {
   return (
     <View style={styles.ingredientsWrapper}>
@@ -77,19 +88,21 @@ const RecipeIngredients: React.FC<{ sequence: string[] }> = ({ sequence }) => {
 // ============================================================================
 // КОМПОНЕНТ: Отображение одного рецепта
 // ============================================================================
+
+/**
+ * Строка одного рецепта: цепочка ингредиентов + результат.
+ *
+ * @param recipe - объект рецепта из RECIPES (id, sequence, result)
+ */
 const RecipeRow: React.FC<{ recipe: Recipe }> = ({ recipe }) => {
   return (
     <View style={styles.recipeRow}>
       {/* Ингредиенты */}
       <RecipeIngredients sequence={recipe.sequence} />
-      
-      {/* ==================================================================== */}
-      {/* 🔑 ИЗМЕНЕНО: Убран знак "=", только результат */}
-      {/* ==================================================================== */}
       <View style={styles.resultWrapper}>
         <RecipeTile 
           textureKey={recipe.result.textureKey} 
-          isResult={true}  // 🔑 Увеличенный размер
+          isResult={true}  
         />
       </View>
     </View>
@@ -104,6 +117,19 @@ export interface RecipeBookProps {
   onClose: () => void;
 }
 
+/**
+ * Модальное окно книги рецептов.
+ *
+ * Показывает все рецепты из константы RECIPES в виде скроллируемого списка.
+ * Каждый рецепт: цепочка ингредиентов (RecipeIngredients) → результат (RecipeTile).
+ *
+ * Поддерживает закрытие свайпом вниз: Pan-жест отслеживает `translationY`;
+ * при смещении > 100px вызывает `onClose`. Горизонтальная прокрутка ScrollView
+ * не конфликтует с Pan-жестом, так как Pan применяется к контейнеру целиком.
+ *
+ * @param visible - управляет видимостью модала
+ * @param onClose - колбэк закрытия
+ */
 export const RecipeBook: React.FC<RecipeBookProps> = ({ visible, onClose }) => {
   
   React.useEffect(() => {
@@ -202,12 +228,9 @@ const styles = StyleSheet.create({
     fontSize: 22,
     fontWeight: 'bold',
   },
-  // ============================================================================
-  // 🔑 ИЗМЕНЕНО: Высота окна увеличена с 85% до 92%
-  // ============================================================================
   recipeBookContainer: {
     width: Math.min(SCREEN_WIDTH - 40, 450),
-    height: SCREEN_HEIGHT * 0.92,  // Было: 0.85 → Стало: 0.92 (92% экрана) ✅
+    height: SCREEN_HEIGHT * 0.92,
     backgroundColor: '#2a2a3a',
     borderRadius: 16,
     padding: 16,
@@ -262,11 +285,11 @@ const styles = StyleSheet.create({
     flexDirection: 'column',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 16,  // Чуть больше отступ
+    paddingVertical: 16,  
     paddingHorizontal: 8,
     borderBottomWidth: 1,
     borderBottomColor: 'rgba(255, 255, 255, 0.1)',
-    minHeight: 95,  // Увеличено для большей плитки результата
+    minHeight: 95,  
   },
   ingredientsWrapper: {
     flexDirection: 'row',
@@ -285,25 +308,17 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     marginHorizontal: 6,
   },
-  // ============================================================================
-  // 🔑 ИЗМЕНЕНО: Убран знак "="
-  // ============================================================================
   resultWrapper: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     paddingTop: 6,
-    // 🔑 Убрано: borderTopWidth и borderTopColor
   },
-  // ============================================================================
-  // 🔑 УДАЛЕНО: styles.equalsSign больше не используется
-  // ============================================================================
   recipeTileContainer: {
     alignItems: 'center',
     marginHorizontal: RECIPE_TILE_SPACING / 2,
   },
   recipeTile: {
-    // Размеры задаются динамически через prop isResult
     borderRadius: 8,
     borderWidth: 2,
     borderColor: '#fff',

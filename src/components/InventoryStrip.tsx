@@ -23,12 +23,25 @@ import {
   INVENTORY_COUNTER_BORDER_COLOR,
 } from '../constants/inventory';
 
+/**
+ * Горизонтальная панель инвентаря в нижней части экрана.
+ *
+ * Структура панели (слева направо):
+ * 1. Кнопка прокрутки влево (◀) — активна только если `canScrollLeft`.
+ * 2. Счётчик свободных слотов — показывает `freeSlots`.
+ * 3. Список видимых плиток — `visibleTiles`, каждая в InventoryCell.
+ * 4. Кнопка прокрутки вправо (▶) — активна только если `canScrollRight`.
+ *
+ * Отступ снизу (`safeBottom`) рассчитывается через `useSafeAreaInsets`:
+ * на Android используется `insets.bottom` (может быть 0 на устройствах без
+ * жестовой навигации), на iOS — `insets.bottom` или минимум 10px.
+ *
+ * `key` для InventoryCell включает `rotationTick` — это форсирует перемонтирование
+ * ячейки при повороте плитки, гарантируя обновление жеста с актуальным rotation.
+ */
 const InventoryStrip: React.FC = () => {
   const insets = useSafeAreaInsets();
   
-  // ============================================================================
-  // 🔍 ОТЛАДКА: Проверяем, что insets работают
-  // ============================================================================
   useEffect(() => {
     if (__DEV__) {
       console.log('[InventoryStrip] 🔍 SafeArea insets:', insets);
@@ -45,13 +58,12 @@ const InventoryStrip: React.FC = () => {
     scrollLeft,
     scrollRight,
     rotateTile,
-    removeTile,
     rotationTick,
   } = useInventory();
 
   useEffect(() => {
     if (__DEV__) {
-      console.log('[InventoryStrip] 📊 State:', {
+      console.log('[InventoryStrip] State:', {
         totalTiles: tiles.length,
         visibleCount: visibleTiles.length,
         freeSlots,
@@ -62,21 +74,20 @@ const InventoryStrip: React.FC = () => {
     }
   }, [tiles.length, visibleTiles.length, freeSlots, scrollOffset, rotationTick]); 
   
+  /** Поворачивает плитку по тапу через useInventory. */
   const handleTileTap = (tileId: string) => {
     rotateTile(tileId);
   };
-  
+
+  /** Логирует начало перетаскивания плитки из инвентаря (только в DEV). */
   const handleTileDragStart = (tileId: string) => {
     if (__DEV__) {
-        console.log(`[InventoryStrip] 🎯 Drag start: ${tileId}`);
+      console.log(`[InventoryStrip] Drag start: ${tileId}`);
     }
   };
   
-  // ============================================================================
-  // 🔑 ГИБРИДНЫЙ ОТСТУП: используем insets ИЛИ запасной 50px для Android
-  // ============================================================================
   const safeBottom = Platform.OS === 'android' 
-  ? Math.max(insets.bottom, 0)  // 👈 Минимум 50px для навигационной панели
+  ? Math.max(insets.bottom, 0)  
   : (insets.bottom || 10);
   
   return (
@@ -84,7 +95,6 @@ const InventoryStrip: React.FC = () => {
       style={[
         styles.container, 
         { 
-          // 👇 marginBottom сдвигает ВЕСЬ контейнер вверх
           marginBottom: safeBottom
         }
       ]} 
@@ -144,7 +154,6 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
     zIndex: 1000,
     overflow: 'visible', 
-    // ❌ paddingBottom убран — используем marginBottom в инлайновом стиле
   },
   scrollButton: {
     width: INVENTORY_SCROLL_BUTTON_SIZE,

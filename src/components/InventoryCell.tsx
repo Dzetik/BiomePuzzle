@@ -72,9 +72,6 @@ const InventoryCell: React.FC<InventoryCellProps> = ({
     
     const pos = {
       x: startX + index * (INVENTORY_CELL_SIZE + cellSpacing),
-      // 👇 КЛЮЧЕВОЕ ИЗМЕНЕНИЕ:
-      // Поскольку InventoryStrip использует marginBottom, контейнер уже сдвинут вверх.
-      // Поэтому НЕ вычитаем safeBottomInset здесь — только высота инвентаря.
       y: screenHeight - INVENTORY_HEIGHT + 15,
     };
     
@@ -88,7 +85,7 @@ const InventoryCell: React.FC<InventoryCellProps> = ({
       });
     }
     return pos;
-  }, [index]); // 👇 Убрали insets.bottom из зависимостей
+  }, [index]); 
   
   // ============================================================================
   // КОЛБЭКИ
@@ -173,7 +170,7 @@ const InventoryCell: React.FC<InventoryCellProps> = ({
   );
   
   // ============================================================================
-  // 🔑 Отслеживать состояние драга и обновлять global
+  // Отслеживать состояние драга и обновлять global
   // ============================================================================
   useEffect(() => {
     if (draggable.state === 'DRAGGING') {

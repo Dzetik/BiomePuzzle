@@ -1,3 +1,12 @@
+// ============================================================================
+// КОМПОНЕНТ: ОТОБРАЖЕНИЕ ПЛИТКИ
+// ============================================================================
+// Универсальный рендерер плитки для трёх контекстов:
+//   - спавнер (перетаскиваемая, position: absolute, высокий zIndex)
+//   - инвентарь (position: relative, выравнивается внутри InventoryCell)
+//   - размещённая на сетке (position: absolute + TouchableOpacity-оверлей)
+// ============================================================================
+
 // src/components/TileView.tsx
 import React from 'react';
 import { Image, View, Text, StyleSheet, TouchableOpacity } from 'react-native'
@@ -18,9 +27,6 @@ interface TileViewProps {
   isInInventory?: boolean;
   debugLabel?: string;
   
-  // ============================================================================
-  // 🔑 Пропсы для активной стороны (крафт)
-  // ============================================================================
   /** Активная сторона плитки (направление стрелки) */
   activeSide?: 'top' | 'right' | 'bottom' | 'left';
   
@@ -30,16 +36,44 @@ interface TileViewProps {
   /** Явно показать/скрыть стрелку (по умолчанию: показывать если activeSide задан) */
   showArrow?: boolean;
   
-  // ============================================================================
-  // 🔑 НОВОЕ: Обработчик нажатия для размещённых плиток
-  // ============================================================================
   /** Флаг: плитка размещена и статична (не перетаскивается) */
   isPlaced?: boolean;
   /** Колбэк нажатия на размещённую плитку */
   onPlacedTilePress?: (tile: Tile) => void;
 }
 
-const TileView: React.FC<TileViewProps> = ({ 
+/**
+ * Главный рендерер плитки.
+ *
+ * Определяет `activeSide` из `tile.activeSide` (приоритет) или из пропа `activeSide`.
+ * Позицию стрелки (`arrowConfig`) вычисляет через `useMemo` — пересчёт только при
+ * изменении `resolvedActiveSide` или размеров плитки.
+ *
+ * Для размещённых плиток (`isPlaced=true`) поверх View рендерятся два дополнительных
+ * элемента: прозрачный TouchableOpacity для перехвата тапа и полупрозрачный highlight-слой
+ * для визуального фидбека. Оба слоя используют тот же `position.x/y`, что и плитка.
+ *
+ * zIndex-стратегия:
+ * - Инвентарь: 10000 (поверх игровой сетки, но под модальными окнами)
+ * - Размещённые: 100 (определяется `debugLabel`)
+ * - Спавнер/перетаскивание: 999999 (поверх всего)
+ *
+ * @param textureSource     - источник изображения текстуры
+ * @param position          - экранная позиция (игнорируется в режиме инвентаря)
+ * @param width             - ширина плитки в пикселях
+ * @param height            - высота плитки в пикселях
+ * @param gesture           - жест из useDraggableFSM (передаётся через panHandlers)
+ * @param tileId            - ID плитки (используется в логах и как key)
+ * @param rotation          - угол поворота в градусах
+ * @param isInInventory     - режим инвентаря (влияет на position и zIndex)
+ * @param debugLabel        - метка для отладочного оверлея
+ * @param activeSide        - явная активная сторона (если не задана в tile)
+ * @param tile              - полный объект плитки (activeSide берётся из него)
+ * @param showArrow         - принудительно показать/скрыть стрелку
+ * @param isPlaced          - плитка статична на сетке (включает tap-оверлей)
+ * @param onPlacedTilePress - колбэк при нажатии на размещённую плитку
+ */
+const TileView: React.FC<TileViewProps> = ({
   textureSource,
   position,
   width,
@@ -58,14 +92,11 @@ const TileView: React.FC<TileViewProps> = ({
   const { offset } = useGrid();
   const { scale } = useZoom();
   
-  // ============================================================================
-  // 🔑 ОПРЕДЕЛЕНИЕ ACTIVE SIDE
-  // ============================================================================
   const resolvedActiveSide = tile?.activeSide ?? activeSide;
   const shouldShowArrow = showArrow !== undefined ? showArrow : !!resolvedActiveSide;
   
   // ============================================================================
-  // 🔑 ВЫЧИСЛЕНИЕ ПОЗИЦИИ СТРЕЛКИ (в локальных координатах плитки)
+  // ВЫЧИСЛЕНИЕ ПОЗИЦИИ СТРЕЛКИ
   // ============================================================================
   const arrowConfig = React.useMemo(() => {
     if (!shouldShowArrow || !resolvedActiveSide) return null;
@@ -131,7 +162,7 @@ const TileView: React.FC<TileViewProps> = ({
   // ============================================================================
   return (
     <>
-      {/* 🔹 Основной контент плитки (как в оригинале) */}
+      {/* Основной контент плитки */}
       <View style={[styles.tile, tileStyle]} {...(gesture ? { ...gesture.panHandlers } : {})} collapsable={false}>
         
         {/* Изображение текстуры */}
@@ -139,8 +170,8 @@ const TileView: React.FC<TileViewProps> = ({
           source={textureSource} 
           style={styles.image} 
           resizeMode="cover"
-          onLoad={() => __DEV__ && console.log(`[TileView] ✅ Image loaded: ${tileId}`)}
-          onError={(e) => __DEV__ && console.error(`[TileView] ❌ Image error: ${tileId}`, e.nativeEvent?.error)}
+          onLoad={() => __DEV__ && console.log(`[TileView] Image loaded: ${tileId}`)}
+          onError={(e) => __DEV__ && console.error(`[TileView] Image error: ${tileId}`, e.nativeEvent?.error)}
         />
         
         {/* Стрелка активной стороны */}
@@ -165,7 +196,7 @@ const TileView: React.FC<TileViewProps> = ({
       </View>
       
       {/* ======================================================================== */}
-      {/* 🔹 ПРОЗРАЧНЫЙ ОВЕРЛЕЙ ДЛЯ ТАПОВ (только для размещённых плиток)          */}
+      {/* ПРОЗРАЧНЫЙ ОВЕРЛЕЙ ДЛЯ ТАПОВ                                             */}
       {/* ======================================================================== */}
       {isPlaced && !gesture && onPlacedTilePress && tile && (
         <TouchableOpacity
@@ -179,12 +210,12 @@ const TileView: React.FC<TileViewProps> = ({
             height: typeof height === 'number' ? height : 50,
             // zIndex на 1 выше, чтобы перехватывать тапы поверх плитки
             zIndex: (typeof tileStyle.zIndex === 'number' ? tileStyle.zIndex : 0) + 1,
-            borderRadius: 8, // Совпадает с borderRadius плитки
+            borderRadius: 8, 
           }}
         />
       )}
       
-      {/* Визуальный фидбек при нажатии (опционально) */}
+      {/* Визуальный фидбек при нажатии */}
       {isPlaced && !gesture && onPlacedTilePress && tile && (
         <View 
           style={[
@@ -242,9 +273,6 @@ const styles = StyleSheet.create({
     fontSize: 8, 
     textAlign: 'center' 
   },
-  // ============================================================================
-  // 🔑 Подсветка при нажатии на размещённую плитку
-  // ============================================================================
   placedHighlight: {
     backgroundColor: 'rgba(255, 255, 255, 0.15)',
     borderRadius: 8,

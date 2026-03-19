@@ -14,6 +14,16 @@ import {
 } from 'react-native';
 import { Tile } from '../models/Tile';
 
+/**
+ * Пропсы модального окна действий для размещённой плитки.
+ *
+ * @param visible       - управляет видимостью модала
+ * @param tile          - плитка, для которой открыто меню; null → модал не рендерится
+ * @param onClose       - закрыть модал без действия
+ * @param onDelete      - удалить плитку безвозвратно
+ * @param onToInventory - переместить плитку с поля в инвентарь
+ * @param onSubmit      - сдать плитку (функция закомментирована в UI, оставлена для будущего)
+ */
 export interface PlacedTileActionModalProps {
   visible: boolean;
   tile: Tile | null;
@@ -23,6 +33,18 @@ export interface PlacedTileActionModalProps {
   onSubmit: (tileId: string) => void;
 }
 
+/**
+ * Анимированное модальное меню действий для размещённой плитки.
+ *
+ * Появляется при тапе на плитку на сетке. Анимация: Animated.parallel запускает
+ * одновременно fade (150ms timing) и spring-масштабирование от 0.9 → 1.0.
+ * При скрытии значения немедленно сбрасываются (без анимации), чтобы следующее
+ * открытие начиналось с корректного начального состояния.
+ *
+ * Тап по полупрозрачному оверлею (`overlayTouch`) вызывает `onClose`.
+ * Каждая кнопка действия вызывает `handleAction`, который диспатчит нужный
+ * колбэк и затем автоматически закрывает модал.
+ */
 export const PlacedTileActionModal: React.FC<PlacedTileActionModalProps> = ({
   visible,
   tile,
@@ -55,6 +77,11 @@ export const PlacedTileActionModal: React.FC<PlacedTileActionModalProps> = ({
     }
   }, [visible]);
 
+  /**
+   * Выполняет выбранное действие над плиткой и закрывает модал.
+   *
+   * @param action - тип действия: 'delete' | 'inventory' | 'submit'
+   */
   const handleAction = (action: 'delete' | 'inventory' | 'submit') => {
     if (!tile) return;
     
@@ -103,7 +130,7 @@ export const PlacedTileActionModal: React.FC<PlacedTileActionModalProps> = ({
           {/* Кнопки действий */}
           <View style={styles.actionsContainer}>
             
-            {/* 🗑️ Удалить */}
+            {/* Удалить */}
             <TouchableOpacity
               style={[styles.actionButton, styles.deleteButton]}
               onPress={() => handleAction('delete')}
@@ -115,7 +142,7 @@ export const PlacedTileActionModal: React.FC<PlacedTileActionModalProps> = ({
               </Text>
             </TouchableOpacity>
 
-            {/* 📦 На склад */}
+            {/* На склад */}
             <TouchableOpacity
               style={[styles.actionButton, styles.inventoryButton]}
               onPress={() => handleAction('inventory')}
@@ -127,7 +154,7 @@ export const PlacedTileActionModal: React.FC<PlacedTileActionModalProps> = ({
               </Text>
             </TouchableOpacity>
 
-            {/* ✅ Сдать */}
+            {/* Сдать */}
             {/*<TouchableOpacity
               style={[styles.actionButton, styles.submitButton]}
               onPress={() => handleAction('submit')}

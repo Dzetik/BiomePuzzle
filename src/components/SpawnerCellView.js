@@ -1,13 +1,32 @@
+// ============================================================================
+// КОМПОНЕНТ: ВИЗУАЛЬНАЯ ЯЧЕЙКА СПАВНЕРА
+// ============================================================================
+
 import React from 'react';
 import { View, StyleSheet } from 'react-native';
 import { useSpawner } from '../hooks/useSpawner';
-import { 
+import {
   getGravityZoneSize,
   getGravityZonePadding,
   getGravityZoneVisual,
-  isGravityZoneEnabled 
+  isGravityZoneEnabled
 } from '../constants/spawner';
 
+/**
+ * Декоративная рамка и подсветка вокруг позиции спавнера.
+ *
+ * Компонент не обрабатывает жесты (`pointerEvents="none"`) — он лишь
+ * визуально обозначает зону, в которой появляется плитка для перетаскивания.
+ *
+ * Структура слоёв (снизу вверх):
+ * 1. `gravityZone` (zIndex: -2) — опциональная полупрозрачная зона притяжения
+ *    за границами спавнера; управляется флагами из констант спавнера.
+ * 2. `glow` (zIndex: -1) — мягкое зелёное свечение вокруг рамки (+10px отступ).
+ * 3. `border` — основная зелёная рамка спавнера.
+ *
+ * Позиция и размер берутся из `useSpawner`, который отслеживает изменения
+ * размеров экрана и пересчитывает координаты при ротации устройства.
+ */
 const SpawnerCellView = () => {
   const spawnerPos = useSpawner();
   
@@ -84,7 +103,7 @@ const styles = StyleSheet.create({
   },
   gravityZone: {
     position: 'absolute',
-    borderRadius: 12, // Делаем скруглённым, чтобы соответствовать спавнеру
+    borderRadius: 12, 
     zIndex: -2,
   },
 });

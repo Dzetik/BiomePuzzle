@@ -21,10 +21,19 @@ import { TEXTURE_MAP, DEFAULT_TEXTURE } from '../constants/textures';
 // ТИПЫ
 // ============================================================================
 
+/**
+ * Пропсы модального окна книги квестов.
+ *
+ * @param visible       - управляет видимостью модала
+ * @param onClose       - закрыть модал
+ * @param tileCounts    - карта textureKey → суммарное количество плиток
+ *                        (поле + инвентарь); используется для проверки выполнения требований
+ * @param onSubmitQuest - колбэк сдачи квеста (вызывается только если `canSubmit`)
+ */
 export interface QuestBookProps {
   visible: boolean;
   onClose: () => void;
-  tileCounts: Record<string, number>; // textureKey -> total count (placed + inventory)
+  tileCounts: Record<string, number>;
   onSubmitQuest: () => void;
 }
 
@@ -38,6 +47,14 @@ interface QuestRequirementItemProps {
   current: number;
 }
 
+/**
+ * Строка одного требования квеста: иконка плитки, прогресс (current / required)
+ * и зелёная галочка при выполнении.
+ *
+ * @param textureKey - ключ текстуры требуемой плитки
+ * @param required   - сколько плиток нужно сдать
+ * @param current    - сколько плиток игрок имеет на данный момент
+ */
 const QuestRequirementItem: React.FC<QuestRequirementItemProps> = ({
   textureKey,
   required,

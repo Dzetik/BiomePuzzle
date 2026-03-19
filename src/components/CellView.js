@@ -1,10 +1,27 @@
+// ============================================================================
+// КОМПОНЕНТ: ОТЛАДОЧНАЯ ЯЧЕЙКА СЕТКИ
+// ============================================================================
+
 import React, { memo, useEffect, useState } from 'react';
 import { View, StyleSheet, Text } from 'react-native';
 import { useZoom } from '../hooks/useZoom';
 import { useGrid } from '../context/GridContext';
 import { useTiles } from '../context/TilesContext';
-import { getCellCornerWithOffset } from '../utils/gridUtils'; // ЭТОТ ИМПОРТ ТЕПЕРЬ РАБОТАЕТ
-
+import { getCellCornerWithOffset } from '../utils/gridUtils'; 
+/**
+ * Отображает одну ячейку логической сетки в дебаг-режиме.
+ *
+ * Используется исключительно для визуальной отладки: показывает границу
+ * ячейки, координаты (col, row) и ID занимающей её плитки. В продакшене
+ * ячейки невидимы (прозрачный фон), но их TouchableOpacity-области остаются
+ * для hit-test при размещении плитки.
+ *
+ * Оборачивается в `memo` — перерисовывается только при изменении col/row
+ * или при смене масштаба/смещения сетки.
+ *
+ * @param {number} col - индекс колонки ячейки (0-based)
+ * @param {number} row - индекс строки ячейки (0-based)
+ */
 const CellView = memo(({ col, row }) => {
   const { scale } = useZoom();
   const { offset } = useGrid();
